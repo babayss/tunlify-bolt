@@ -3,7 +3,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
-const pool = require('../config/database');
+const supabase = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const { sendOTPEmail } = require('../utils/email');
 
@@ -27,12 +27,13 @@ router.post('/register', [
     const { email, password, name } = req.body;
 
     // Check if user exists
-    const existingUser = await pool.query(
-      'SELECT id FROM users WHERE email = $1',
-      [email]
-    );
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser) {
       return res.status(409).json({ message: 'User already exists' });
     }
 
@@ -41,25 +42,40 @@ router.post('/register', [
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Create user
-    const result = await pool.query(
-      `INSERT INTO users (email, password_hash, name, role, is_verified) 
-       VALUES ($1, $2, $3, 'user', false) 
-       RETURNING id, email, name`,
-      [email, hashedPassword, name]
-    );
+    const { data: newUser, error: userError } = await supabase
+      .from('users')
+      .insert([{
+        email,
+        password_hash: hashedPassword,
+        name,
+        role: 'user',
+        is_verified: false
+      }])
+      .select()
+      .single();
 
-    const newUser = result.rows[0];
+    if (userError) {
+      console.error('User creation error:', userError);
+      return res.status(500).json({ message: 'Failed to create user' });
+    }
 
     // Generate OTP
     const otp = crypto.randomInt(100000, 999999).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
     // Store OTP
-    await pool.query(
-      `INSERT INTO otp_tokens (user_id, token, expires_at, verified) 
-       VALUES ($1, $2, $3, false)`,
-      [newUser.id, otp, expiresAt]
-    );
+    const { error: otpError } = await supabase
+      .from('otp_tokens')
+      .insert([{
+        user_id: newUser.id,
+        token: otp,
+        expires_at: expiresAt.toISOString(),
+        verified: false
+      }]);
+
+    if (otpError) {
+      console.error('OTP creation error:', otpError);
+    }
 
     // Send OTP email
     try {
@@ -97,39 +113,45 @@ router.post('/verify-otp', [
     const { email, otp } = req.body;
 
     // Find user
-    const userResult = await pool.query(
-      'SELECT id FROM users WHERE email = $1',
-      [email]
-    );
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
 
-    if (userResult.rows.length === 0) {
+    if (userError || !user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const userId = userResult.rows[0].id;
-
     // Find valid OTP
-    const otpResult = await pool.query(
-      `SELECT id FROM otp_tokens 
-       WHERE user_id = $1 AND token = $2 AND verified = false AND expires_at > NOW()`,
-      [userId, otp]
-    );
+    const { data: otpToken, error: otpError } = await supabase
+      .from('otp_tokens')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('token', otp)
+      .eq('verified', false)
+      .gt('expires_at', new Date().toISOString())
+      .single();
 
-    if (otpResult.rows.length === 0) {
+    if (otpError || !otpToken) {
       return res.status(400).json({ message: 'Invalid or expired OTP' });
     }
 
     // Mark user as verified
-    await pool.query(
-      'UPDATE users SET is_verified = true WHERE id = $1',
-      [userId]
-    );
+    const { error: updateUserError } = await supabase
+      .from('users')
+      .update({ is_verified: true })
+      .eq('id', user.id);
+
+    if (updateUserError) {
+      return res.status(500).json({ message: 'Failed to verify user' });
+    }
 
     // Mark OTP as used
-    await pool.query(
-      'UPDATE otp_tokens SET verified = true WHERE id = $1',
-      [otpResult.rows[0].id]
-    );
+    await supabase
+      .from('otp_tokens')
+      .update({ verified: true })
+      .eq('id', otpToken.id);
 
     res.json({ message: 'Email verified successfully' });
 
@@ -156,16 +178,15 @@ router.post('/login', [
     const { email, password } = req.body;
 
     // Find user
-    const result = await pool.query(
-      'SELECT * FROM users WHERE email = $1',
-      [email]
-    );
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error || !user) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
-
-    const user = result.rows[0];
 
     // Check if verified
     if (!user.is_verified) {

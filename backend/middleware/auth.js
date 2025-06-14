@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const pool = require('../config/database');
+const supabase = require('../config/database');
 
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -12,17 +12,18 @@ const authenticateToken = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Get user from database
-    const result = await pool.query(
-      'SELECT id, email, name, role, is_verified FROM users WHERE id = $1',
-      [decoded.userId]
-    );
+    // Get user from Supabase
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, email, name, role, is_verified')
+      .eq('id', decoded.userId)
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error || !user) {
       return res.status(401).json({ message: 'User not found' });
     }
 
-    req.user = result.rows[0];
+    req.user = user;
     next();
   } catch (error) {
     console.error('Auth error:', error);

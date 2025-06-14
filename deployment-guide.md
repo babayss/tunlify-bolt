@@ -1,27 +1,35 @@
 # 🚀 Tunlify Deployment Guide
 
-## Server A (Backend Server)
+## Prerequisites
 
-### 1. Setup Database
-```bash
-# Install PostgreSQL
-sudo apt update
-sudo apt install postgresql postgresql-contrib
+### External Services Setup
 
-# Create database and user
-sudo -u postgres psql
-CREATE DATABASE tunlify;
-CREATE USER tunlify_user WITH PASSWORD 'your_secure_password';
-GRANT ALL PRIVILEGES ON DATABASE tunlify TO tunlify_user;
-\q
+#### 1. Supabase Database
+1. Buat project di [Supabase](https://supabase.com)
+2. Copy URL dan Service Role Key
+3. Import schema dari `supabase/migrations/20250614102833_yellow_hat.sql`
 
-# Import schema
-sudo -u postgres psql tunlify < backend/database/schema.sql
+#### 2. Redis Cloud
+1. Buat database di [Redis Cloud](https://redis.io)
+2. Copy connection URL
+3. Test koneksi
+
+#### 3. Domain & DNS
+```
+A     tunlify.biz.id          -> Server A IP
+A     api.tunlify.biz.id      -> Server A IP  
+A     *.id.tunlify.biz.id     -> Server A IP
+A     *.sg.tunlify.biz.id     -> Server A IP
+A     *.us.tunlify.biz.id     -> Server A IP
+A     *.de.tunlify.biz.id     -> Server A IP
+A     *.jp.tunlify.biz.id     -> Server A IP
 ```
 
-### 2. Setup Backend API
+## Server A (Backend + Caddy)
+
+### 1. Setup Backend API
 ```bash
-# Clone dan setup backend
+# Clone repository
 cd /opt
 sudo git clone your-repo tunlify-backend
 cd tunlify-backend/backend
@@ -32,13 +40,38 @@ sudo npm install
 # Setup environment
 sudo cp .env.example .env
 sudo nano .env
-# Edit dengan konfigurasi yang sesuai
-
-# Test backend
-npm start
 ```
 
-### 3. Setup PM2 (Process Manager)
+**Environment Variables (.env):**
+```env
+# Supabase Configuration
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+
+# Redis Configuration  
+REDIS_URL=redis://default:password@redis-12345.c1.us-east-1-2.ec2.cloud.redislabs.com:12345
+
+# JWT Secret
+JWT_SECRET=your-super-secret-jwt-key-here
+
+# Server Configuration
+PORT=3001
+NODE_ENV=production
+
+# Email Configuration (for OTP)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+
+# Frontend URL (for CORS)
+FRONTEND_URL=https://tunlify.biz.id
+
+# Tunnel Configuration
+TUNNEL_BASE_DOMAIN=tunlify.biz.id
+```
+
+### 2. Setup PM2 (Process Manager)
 ```bash
 # Install PM2
 sudo npm install -g pm2
@@ -74,7 +107,7 @@ sudo pm2 startup
 sudo pm2 save
 ```
 
-### 4. Setup Caddy
+### 3. Setup Caddy
 ```bash
 # Install Caddy
 sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
@@ -96,7 +129,7 @@ sudo systemctl enable caddy
 sudo systemctl start caddy
 ```
 
-## Server B (Frontend Server)
+## Server B (Frontend)
 
 ### 1. Setup Frontend
 ```bash
@@ -110,9 +143,15 @@ sudo npm install
 
 # Setup environment
 sudo nano .env.local
-# Tambahkan:
-# NEXT_PUBLIC_BACKEND_URL=https://api.tunlify.biz.id
+```
 
+**Environment Variables (.env.local):**
+```env
+NEXT_PUBLIC_BACKEND_URL=https://api.tunlify.biz.id
+NEXT_PUBLIC_IPINFO_TOKEN=your_ipinfo_token_here
+```
+
+```bash
 # Build frontend
 sudo npm run build
 ```
@@ -190,17 +229,32 @@ sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d tunlify.biz.id
 ```
 
-## DNS Configuration
+## Testing & Verification
 
-### Domain Records
+### 1. Test Backend API
+```bash
+# Health check
+curl https://api.tunlify.biz.id/health
+
+# Test login
+curl -X POST https://api.tunlify.biz.id/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@tunlify.net","password":"123456"}'
 ```
-A     tunlify.biz.id          -> Server A IP
-A     api.tunlify.biz.id      -> Server A IP
-A     *.id.tunlify.biz.id     -> Server A IP
-A     *.sg.tunlify.biz.id     -> Server A IP
-A     *.us.tunlify.biz.id     -> Server A IP
-A     *.de.tunlify.biz.id     -> Server A IP
-A     *.jp.tunlify.biz.id     -> Server A IP
+
+### 2. Test Frontend
+```bash
+# Check frontend
+curl https://tunlify.biz.id
+
+# Check if API calls work
+# Login via frontend dan cek dashboard
+```
+
+### 3. Test Tunnel System
+```bash
+# Create tunnel via dashboard
+# Test subdomain: https://test.id.tunlify.biz.id
 ```
 
 ## Monitoring & Maintenance
@@ -210,7 +264,6 @@ A     *.jp.tunlify.biz.id     -> Server A IP
 # Backend (Server A)
 sudo pm2 status
 sudo systemctl status caddy
-sudo systemctl status postgresql
 
 # Frontend (Server B)
 sudo pm2 status
@@ -249,37 +302,39 @@ sudo pm2 restart tunlify-frontend
 
 - ✅ Firewall configured (UFW)
 - ✅ SSH key authentication
-- ✅ Database password secured
-- ✅ JWT secret generated
+- ✅ Supabase RLS enabled
+- ✅ Redis password protected
+- ✅ JWT secret secured
 - ✅ SMTP credentials secured
 - ✅ SSL certificates installed
-- ✅ Regular backups scheduled
-- ✅ Log rotation configured
+- ✅ Environment variables secured
 
-## Backup Strategy
+## Default Users
 
-### Database Backup
-```bash
-# Create backup script
-sudo nano /opt/backup-db.sh
-```
+- **Admin**: admin@tunlify.net / 123456
+- **User**: user@tunlify.net / 123456
 
-```bash
-#!/bin/bash
-BACKUP_DIR="/opt/backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-mkdir -p $BACKUP_DIR
+## Architecture Benefits
 
-# Database backup
-sudo -u postgres pg_dump tunlify > $BACKUP_DIR/tunlify_$DATE.sql
+### ✅ **Separation of Concerns**
+- Frontend: Static files + UI logic
+- Backend: API + Business logic
+- Database: Supabase (managed)
+- Cache: Redis Cloud (managed)
 
-# Keep only last 7 days
-find $BACKUP_DIR -name "tunlify_*.sql" -mtime +7 -delete
-```
+### ✅ **Scalability**
+- Frontend dapat di-scale horizontal
+- Backend dapat di-scale dengan PM2 cluster
+- Database dan Redis di-manage oleh provider
 
-```bash
-# Make executable and add to cron
-sudo chmod +x /opt/backup-db.sh
-sudo crontab -e
-# Add: 0 2 * * * /opt/backup-db.sh
-```
+### ✅ **Security**
+- Database credentials hanya di backend
+- JWT secret tidak exposed ke frontend
+- CORS protection
+- Rate limiting
+
+### ✅ **Maintenance**
+- Managed database (Supabase)
+- Managed cache (Redis Cloud)
+- Automated SSL (Caddy)
+- Process management (PM2)
