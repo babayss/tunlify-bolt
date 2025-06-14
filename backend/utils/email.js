@@ -5,6 +5,7 @@ const isEmailDisabled = process.env.DISABLE_EMAIL === 'true';
 
 let transporter = null;
 
+// ONLY create transporter if email is NOT disabled
 if (!isEmailDisabled) {
   // Create transporter (FIXED: createTransport, bukan createTransporter)
   transporter = nodemailer.createTransport({
@@ -21,7 +22,7 @@ if (!isEmailDisabled) {
     socketTimeout: 10000,     // 10 seconds
   });
 
-  // Verify SMTP connection on startup
+  // Verify SMTP connection on startup ONLY if email enabled
   transporter.verify((error, success) => {
     if (error) {
       console.error('❌ SMTP Configuration Error:', error.message);
@@ -32,7 +33,7 @@ if (!isEmailDisabled) {
     }
   });
 } else {
-  console.log('📧 Email disabled - OTP verification skipped');
+  console.log('📧 Email disabled - No SMTP connection will be made');
 }
 
 const sendOTPEmail = async (email, otp, name) => {
