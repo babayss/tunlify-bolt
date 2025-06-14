@@ -1,33 +1,11 @@
-# Caddyfile untuk Tunlify Backend
-
-# Frontend website
-tunlify.biz.id {
-    reverse_proxy localhost:3000
-    
-    # Security headers
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        X-XSS-Protection "1; mode=block"
-        Referrer-Policy "strict-origin-when-cross-origin"
-    }
-    
-    # Gzip compression
-    encode gzip
-    
-    # Logs
-    log {
-        output file /var/log/caddy/tunlify-frontend.log
-        format json
-    }
-}
+# Caddyfile untuk Server A (70.153.208.184)
+# Handles: api.tunlify.biz.id dan *.id.tunlify.biz.id
 
 # Backend API
 api.tunlify.biz.id {
     reverse_proxy localhost:3001
     
-    # CORS headers
+    # CORS headers untuk frontend di Server B
     header {
         Access-Control-Allow-Origin "https://tunlify.biz.id"
         Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
@@ -54,15 +32,25 @@ api.tunlify.biz.id {
     }
 }
 
-# Wildcard untuk tunnel subdomains
+# Wildcard untuk tunnel subdomains - Indonesia region
 *.id.tunlify.biz.id {
-    # Extract subdomain
+    # Extract subdomain (contoh: myapp.id.tunlify.biz.id -> myapp)
     @tunnel expression {labels.3} != ""
     
     # Reverse proxy ke backend untuk mendapatkan target
-    reverse_proxy @tunnel localhost:3001 {
+    reverse_proxy @tunnel localhost:3001/tunnel-proxy {
         header_up X-Tunnel-Subdomain {labels.3}
         header_up X-Tunnel-Region "id"
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+    
+    # Security headers
+    header {
+        X-Powered-By "Tunlify"
+        X-Tunnel-Region "id"
     }
     
     # Logs
@@ -72,13 +60,22 @@ api.tunlify.biz.id {
     }
 }
 
-# Wildcard untuk region lain (contoh: Singapore)
+# Wildcard untuk region lain jika diperlukan nanti
 *.sg.tunlify.biz.id {
     @tunnel expression {labels.3} != ""
     
-    reverse_proxy @tunnel localhost:3001 {
+    reverse_proxy @tunnel localhost:3001/tunnel-proxy {
         header_up X-Tunnel-Subdomain {labels.3}
         header_up X-Tunnel-Region "sg"
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+    
+    header {
+        X-Powered-By "Tunlify"
+        X-Tunnel-Region "sg"
     }
     
     log {
@@ -87,47 +84,25 @@ api.tunlify.biz.id {
     }
 }
 
-# Wildcard untuk region US
 *.us.tunlify.biz.id {
     @tunnel expression {labels.3} != ""
     
-    reverse_proxy @tunnel localhost:3001 {
+    reverse_proxy @tunnel localhost:3001/tunnel-proxy {
         header_up X-Tunnel-Subdomain {labels.3}
         header_up X-Tunnel-Region "us"
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+    
+    header {
+        X-Powered-By "Tunlify"
+        X-Tunnel-Region "us"
     }
     
     log {
         output file /var/log/caddy/tunlify-tunnels-us.log
-        format json
-    }
-}
-
-# Wildcard untuk region Germany
-*.de.tunlify.biz.id {
-    @tunnel expression {labels.3} != ""
-    
-    reverse_proxy @tunnel localhost:3001 {
-        header_up X-Tunnel-Subdomain {labels.3}
-        header_up X-Tunnel-Region "de"
-    }
-    
-    log {
-        output file /var/log/caddy/tunlify-tunnels-de.log
-        format json
-    }
-}
-
-# Wildcard untuk region Japan
-*.jp.tunlify.biz.id {
-    @tunnel expression {labels.3} != ""
-    
-    reverse_proxy @tunnel localhost:3001 {
-        header_up X-Tunnel-Subdomain {labels.3}
-        header_up X-Tunnel-Region "jp"
-    }
-    
-    log {
-        output file /var/log/caddy/tunlify-tunnels-jp.log
         format json
     }
 }
