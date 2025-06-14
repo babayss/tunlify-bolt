@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const crypto = require('crypto');
 const supabase = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -35,11 +36,9 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Create tunnel
+// Create tunnel (ngrok-style)
 router.post('/', authenticateToken, [
   body('subdomain').trim().isLength({ min: 3, max: 50 }).matches(/^[a-z0-9-]+$/),
-  body('target_ip').isIP(),
-  body('target_port').isInt({ min: 1, max: 65535 }),
   body('location').trim().isLength({ min: 2, max: 10 })
 ], async (req, res) => {
   try {
@@ -51,7 +50,7 @@ router.post('/', authenticateToken, [
       });
     }
 
-    const { subdomain, target_ip, target_port, location } = req.body;
+    const { subdomain, location } = req.body;
 
     // Check if subdomain is already taken
     const { data: existingTunnel } = await supabase
@@ -78,16 +77,19 @@ router.post('/', authenticateToken, [
       return res.status(400).json({ message: 'Invalid server location' });
     }
 
+    // Generate unique connection token
+    const connectionToken = crypto.randomBytes(32).toString('hex');
+
     // Create tunnel
     const { data: tunnel, error: createError } = await supabase
       .from('tunnels')
       .insert([{
         user_id: req.user.id,
         subdomain,
-        target_ip,
-        target_port,
         location,
-        status: 'active'
+        connection_token: connectionToken,
+        status: 'inactive', // Will be active when client connects
+        client_connected: false
       }])
       .select()
       .single();
@@ -97,12 +99,16 @@ router.post('/', authenticateToken, [
       return res.status(500).json({ message: 'Failed to create tunnel' });
     }
 
-    // Here you would typically configure the actual tunnel/proxy
-    // For now, we'll just return the tunnel data
+    console.log(`✅ Tunnel created: ${subdomain}.${location}.tunlify.biz.id`);
+    console.log(`🔑 Connection token: ${connectionToken}`);
     
     res.status(201).json({
       ...tunnel,
-      tunnel_url: `https://${subdomain}.${location}.${process.env.TUNNEL_BASE_DOMAIN}`
+      tunnel_url: `https://${subdomain}.${location}.${process.env.TUNNEL_BASE_DOMAIN}`,
+      setup_instructions: {
+        download_url: 'https://github.com/tunlify/client/releases/latest',
+        command: `./tunlify-client -token=${connectionToken} -local=127.0.0.1:3000`
+      }
     });
 
   } catch (error) {
@@ -139,7 +145,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       return res.status(500).json({ message: 'Failed to delete tunnel' });
     }
 
-    // Here you would typically remove the actual tunnel/proxy configuration
+    console.log(`🗑️ Tunnel deleted: ${tunnel.subdomain}.${tunnel.location}.tunlify.biz.id`);
 
     res.json({ message: 'Tunnel deleted successfully' });
 
@@ -149,9 +155,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Update tunnel status
+// Update tunnel status (for client connections)
 router.patch('/:id/status', authenticateToken, [
-  body('status').isIn(['active', 'inactive'])
+  body('status').isIn(['active', 'inactive']),
+  body('client_connected').optional().isBoolean()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -163,7 +170,7 @@ router.patch('/:id/status', authenticateToken, [
     }
 
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, client_connected } = req.body;
 
     // Check if tunnel belongs to user
     const { data: tunnel, error: findError } = await supabase
@@ -178,9 +185,17 @@ router.patch('/:id/status', authenticateToken, [
     }
 
     // Update status
+    const updateData = { status };
+    if (client_connected !== undefined) {
+      updateData.client_connected = client_connected;
+      if (client_connected) {
+        updateData.last_connected = new Date().toISOString();
+      }
+    }
+
     const { data: updatedTunnel, error: updateError } = await supabase
       .from('tunnels')
-      .update({ status })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
@@ -190,10 +205,68 @@ router.patch('/:id/status', authenticateToken, [
       return res.status(500).json({ message: 'Failed to update tunnel status' });
     }
 
+    console.log(`🔄 Tunnel status updated: ${tunnel.subdomain}.${tunnel.location} -> ${status} (connected: ${client_connected})`);
+
     res.json(updatedTunnel);
 
   } catch (error) {
     console.error('Update tunnel status error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Client authentication endpoint (for Golang client)
+router.post('/auth', [
+  body('connection_token').isLength({ min: 32, max: 64 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ 
+        message: 'Invalid connection token', 
+        errors: errors.array() 
+      });
+    }
+
+    const { connection_token } = req.body;
+
+    // Find tunnel by connection token
+    const { data: tunnel, error } = await supabase
+      .from('tunnels')
+      .select(`
+        *,
+        users!tunnels_user_id_fkey(email, name)
+      `)
+      .eq('connection_token', connection_token)
+      .single();
+
+    if (error || !tunnel) {
+      return res.status(401).json({ message: 'Invalid connection token' });
+    }
+
+    // Update tunnel as connected
+    await supabase
+      .from('tunnels')
+      .update({ 
+        client_connected: true, 
+        status: 'active',
+        last_connected: new Date().toISOString()
+      })
+      .eq('id', tunnel.id);
+
+    console.log(`🔗 Client connected: ${tunnel.subdomain}.${tunnel.location}.tunlify.biz.id`);
+    console.log(`👤 User: ${tunnel.users.email}`);
+
+    res.json({
+      tunnel_id: tunnel.id,
+      subdomain: tunnel.subdomain,
+      location: tunnel.location,
+      tunnel_url: `https://${tunnel.subdomain}.${tunnel.location}.${process.env.TUNNEL_BASE_DOMAIN}`,
+      user: tunnel.users.name
+    });
+
+  } catch (error) {
+    console.error('Client auth error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

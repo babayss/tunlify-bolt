@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import Navbar from '@/components/Navbar';
 import { 
   Plus, 
@@ -21,7 +22,12 @@ import {
   Copy,
   ExternalLink,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  Download,
+  Terminal,
+  Key,
+  Code,
+  CheckCircle
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/hooks/useLanguage';
@@ -33,11 +39,12 @@ import Cookies from 'js-cookie';
 interface Tunnel {
   id: string;
   subdomain: string;
-  target_ip: string;
-  target_port: number;
   location: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'connecting';
+  connection_token: string;
   created_at: string;
+  last_connected?: string;
+  client_connected: boolean;
 }
 
 interface ServerLocation {
@@ -52,10 +59,10 @@ export default function DashboardPage() {
   const [serverLocations, setServerLocations] = useState<ServerLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [setupDialogOpen, setSetupDialogOpen] = useState(false);
+  const [selectedTunnel, setSelectedTunnel] = useState<Tunnel | null>(null);
   const [newTunnel, setNewTunnel] = useState({
     subdomain: '',
-    target_ip: '',
-    target_port: '',
     location: '',
   });
 
@@ -110,18 +117,20 @@ export default function DashboardPage() {
     e.preventDefault();
     
     try {
-      const response = await apiClient.post('/api/tunnels', {
-        ...newTunnel,
-        target_port: parseInt(newTunnel.target_port),
-      }, {
+      const response = await apiClient.post('/api/tunnels', newTunnel, {
         headers: getAuthHeaders(),
       });
 
       if (response.ok) {
+        const tunnel = await response.json();
         toast.success(language === 'id' ? 'Tunnel berhasil dibuat!' : 'Tunnel created successfully!');
         setCreateDialogOpen(false);
-        setNewTunnel({ subdomain: '', target_ip: '', target_port: '', location: '' });
+        setNewTunnel({ subdomain: '', location: '' });
         fetchTunnels();
+        
+        // Show setup dialog
+        setSelectedTunnel(tunnel);
+        setSetupDialogOpen(true);
       } else {
         const error = await response.json();
         toast.error(error.message);
@@ -151,6 +160,14 @@ export default function DashboardPage() {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast.success(language === 'id' ? 'Disalin ke clipboard!' : 'Copied to clipboard!');
+  };
+
+  const getClientCommand = (tunnel: Tunnel) => {
+    return `./tunlify-client -token=${tunnel.connection_token} -local=127.0.0.1:3000`;
+  };
+
+  const getDownloadUrl = () => {
+    return 'https://github.com/tunlify/client/releases/latest';
   };
 
   if (loading) {
@@ -205,35 +222,8 @@ export default function DashboardPage() {
                     />
                     <p className="text-xs text-muted-foreground">
                       {language === 'id' ? 'Akan menjadi: ' : 'Will become: '}
-                      {newTunnel.subdomain || 'myapp'}.tunlify.biz.id
+                      {newTunnel.subdomain || 'myapp'}.{newTunnel.location || 'id'}.tunlify.biz.id
                     </p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="target_ip">
-                      {language === 'id' ? 'IP Target' : 'Target IP'}
-                    </Label>
-                    <Input
-                      id="target_ip"
-                      value={newTunnel.target_ip}
-                      onChange={(e) => setNewTunnel({ ...newTunnel, target_ip: e.target.value })}
-                      placeholder="127.0.0.1"
-                      required
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="target_port">
-                      {language === 'id' ? 'Port Target' : 'Target Port'}
-                    </Label>
-                    <Input
-                      id="target_port"
-                      type="number"
-                      value={newTunnel.target_port}
-                      onChange={(e) => setNewTunnel({ ...newTunnel, target_port: e.target.value })}
-                      placeholder="3000"
-                      required
-                    />
                   </div>
                   
                   <div className="space-y-2">
@@ -292,7 +282,7 @@ export default function DashboardPage() {
                       {language === 'id' ? 'Tunnel Aktif' : 'Active Tunnels'}
                     </p>
                     <p className="text-2xl font-bold">
-                      {tunnels.filter(t => t.status === 'active').length}
+                      {tunnels.filter(t => t.client_connected).length}
                     </p>
                   </div>
                   <Activity className="h-8 w-8 text-green-500" />
@@ -370,22 +360,24 @@ export default function DashboardPage() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="font-semibold">
-                            {tunnel.subdomain}.tunlify.biz.id
+                            {tunnel.subdomain}.{tunnel.location}.tunlify.biz.id
                           </h3>
-                          <Badge variant={tunnel.status === 'active' ? 'default' : 'secondary'}>
-                            {tunnel.status === 'active' ? t('active') : t('inactive')}
+                          <Badge variant={tunnel.client_connected ? 'default' : 'secondary'}>
+                            {tunnel.client_connected ? (language === 'id' ? 'Terhubung' : 'Connected') : (language === 'id' ? 'Tidak Terhubung' : 'Disconnected')}
                           </Badge>
                         </div>
                         <div className="text-sm text-muted-foreground space-y-1">
-                          <p>
-                            {t('targetAddress')}: {tunnel.target_ip}:{tunnel.target_port}
-                          </p>
                           <p>
                             {t('location')}: {serverLocations.find(l => l.region_code === tunnel.location)?.name || tunnel.location}
                           </p>
                           <p>
                             {language === 'id' ? 'Dibuat' : 'Created'}: {new Date(tunnel.created_at).toLocaleDateString()}
                           </p>
+                          {tunnel.last_connected && (
+                            <p>
+                              {language === 'id' ? 'Terakhir terhubung' : 'Last connected'}: {new Date(tunnel.last_connected).toLocaleString()}
+                            </p>
+                          )}
                         </div>
                       </div>
                       
@@ -393,7 +385,17 @@ export default function DashboardPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => copyToClipboard(`https://${tunnel.subdomain}.tunlify.biz.id`)}
+                          onClick={() => {
+                            setSelectedTunnel(tunnel);
+                            setSetupDialogOpen(true);
+                          }}
+                        >
+                          <Terminal className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => copyToClipboard(`https://${tunnel.subdomain}.${tunnel.location}.tunlify.biz.id`)}
                         >
                           <Copy className="h-4 w-4" />
                         </Button>
@@ -402,7 +404,7 @@ export default function DashboardPage() {
                           size="sm"
                           asChild
                         >
-                          <a href={`https://${tunnel.subdomain}.tunlify.biz.id`} target="_blank" rel="noopener noreferrer">
+                          <a href={`https://${tunnel.subdomain}.${tunnel.location}.tunlify.biz.id`} target="_blank" rel="noopener noreferrer">
                             <ExternalLink className="h-4 w-4" />
                           </a>
                         </Button>
@@ -420,6 +422,145 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Setup Dialog */}
+          <Dialog open={setupDialogOpen} onOpenChange={setSetupDialogOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Terminal className="h-5 w-5" />
+                  {language === 'id' ? 'Setup Tunnel Client' : 'Setup Tunnel Client'}
+                </DialogTitle>
+              </DialogHeader>
+              
+              {selectedTunnel && (
+                <div className="space-y-6">
+                  {/* Tunnel Info */}
+                  <Alert>
+                    <CheckCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong>Tunnel URL:</strong> https://{selectedTunnel.subdomain}.{selectedTunnel.location}.tunlify.biz.id
+                    </AlertDescription>
+                  </Alert>
+
+                  <Tabs defaultValue="download" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="download">
+                        {language === 'id' ? '1. Download' : '1. Download'}
+                      </TabsTrigger>
+                      <TabsTrigger value="setup">
+                        {language === 'id' ? '2. Setup' : '2. Setup'}
+                      </TabsTrigger>
+                      <TabsTrigger value="run">
+                        {language === 'id' ? '3. Jalankan' : '3. Run'}
+                      </TabsTrigger>
+                    </TabsList>
+                    
+                    <TabsContent value="download" className="space-y-4">
+                      <div>
+                        <h3 className="font-semibold mb-2">
+                          {language === 'id' ? 'Download Tunlify Client' : 'Download Tunlify Client'}
+                        </h3>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          {language === 'id' 
+                            ? 'Download client sesuai dengan sistem operasi Anda:'
+                            : 'Download the client for your operating system:'
+                          }
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <Button variant="outline" asChild>
+                            <a href={`${getDownloadUrl()}/download/tunlify-client-windows.exe`} target="_blank">
+                              <Download className="h-4 w-4 mr-2" />
+                              Windows
+                            </a>
+                          </Button>
+                          <Button variant="outline" asChild>
+                            <a href={`${getDownloadUrl()}/download/tunlify-client-macos`} target="_blank">
+                              <Download className="h-4 w-4 mr-2" />
+                              macOS
+                            </a>
+                          </Button>
+                          <Button variant="outline" asChild>
+                            <a href={`${getDownloadUrl()}/download/tunlify-client-linux`} target="_blank">
+                              <Download className="h-4 w-4 mr-2" />
+                              Linux
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    </TabsContent>
+                    
+                    <TabsContent value="setup" className="space-y-4">
+                      <div>
+                        <h3 className="font-semibold mb-2">
+                          {language === 'id' ? 'Connection Token' : 'Connection Token'}
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          <Input 
+                            value={selectedTunnel.connection_token} 
+                            readOnly 
+                            className="font-mono text-sm"
+                          />
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => copyToClipboard(selectedTunnel.connection_token)}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {language === 'id' 
+                            ? 'Token ini digunakan untuk menghubungkan client ke tunnel Anda.'
+                            : 'This token is used to connect your client to your tunnel.'
+                          }
+                        </p>
+                      </div>
+                    </TabsContent>
+                    
+                    <TabsContent value="run" className="space-y-4">
+                      <div>
+                        <h3 className="font-semibold mb-2">
+                          {language === 'id' ? 'Jalankan Client' : 'Run Client'}
+                        </h3>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          {language === 'id' 
+                            ? 'Jalankan perintah berikut di terminal/command prompt:'
+                            : 'Run the following command in your terminal/command prompt:'
+                          }
+                        </p>
+                        <div className="bg-muted p-4 rounded-lg">
+                          <code className="text-sm font-mono">
+                            {getClientCommand(selectedTunnel)}
+                          </code>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="ml-2"
+                            onClick={() => copyToClipboard(getClientCommand(selectedTunnel))}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {language === 'id' 
+                            ? 'Ganti 127.0.0.1:3000 dengan alamat aplikasi lokal Anda.'
+                            : 'Replace 127.0.0.1:3000 with your local application address.'
+                          }
+                        </p>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+
+                  <div className="flex justify-end">
+                    <Button onClick={() => setSetupDialogOpen(false)}>
+                      {language === 'id' ? 'Selesai' : 'Done'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </motion.div>
       </div>
     </div>
