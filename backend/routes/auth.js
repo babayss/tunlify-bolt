@@ -9,6 +9,9 @@ const { sendOTPEmail } = require('../utils/email');
 
 const router = express.Router();
 
+// Check if email is disabled
+const isEmailDisabled = process.env.DISABLE_EMAIL === 'true';
+
 // Register
 router.post('/register', [
   body('email').isEmail().normalizeEmail(),
@@ -49,7 +52,7 @@ router.post('/register', [
         password_hash: hashedPassword,
         name,
         role: 'user',
-        is_verified: false
+        is_verified: isEmailDisabled // Auto verify if email disabled
       }])
       .select()
       .single();
@@ -57,6 +60,16 @@ router.post('/register', [
     if (userError) {
       console.error('User creation error:', userError);
       return res.status(500).json({ message: 'Failed to create user' });
+    }
+
+    // If email is disabled, return success immediately
+    if (isEmailDisabled) {
+      console.log('📧 Email disabled - User auto-verified:', email);
+      return res.status(201).json({
+        message: 'User created and verified successfully (email disabled)',
+        userId: newUser.id,
+        autoVerified: true
+      });
     }
 
     // Generate OTP
@@ -80,15 +93,27 @@ router.post('/register', [
     // Send OTP email
     try {
       await sendOTPEmail(email, otp, name);
+      
+      res.status(201).json({
+        message: 'User created successfully. Please check your email for OTP.',
+        userId: newUser.id
+      });
     } catch (emailError) {
       console.error('Failed to send OTP email:', emailError);
-      // Continue anyway - user can request new OTP
+      
+      // If email fails, auto-verify user and continue
+      await supabase
+        .from('users')
+        .update({ is_verified: true })
+        .eq('id', newUser.id);
+      
+      res.status(201).json({
+        message: 'User created successfully. Email service unavailable - account auto-verified.',
+        userId: newUser.id,
+        autoVerified: true,
+        emailError: 'Email service temporarily unavailable'
+      });
     }
-
-    res.status(201).json({
-      message: 'User created successfully. Please check your email for OTP.',
-      userId: newUser.id
-    });
 
   } catch (error) {
     console.error('Registration error:', error);
@@ -115,12 +140,27 @@ router.post('/verify-otp', [
     // Find user
     const { data: user, error: userError } = await supabase
       .from('users')
-      .select('id')
+      .select('id, is_verified')
       .eq('email', email)
       .single();
 
     if (userError || !user) {
       return res.status(404).json({ message: 'User not found' });
+    }
+
+    // If already verified, return success
+    if (user.is_verified) {
+      return res.json({ message: 'Email already verified' });
+    }
+
+    // If email is disabled, auto-verify
+    if (isEmailDisabled) {
+      await supabase
+        .from('users')
+        .update({ is_verified: true })
+        .eq('id', user.id);
+      
+      return res.json({ message: 'Email verified successfully (auto-verified)' });
     }
 
     // Find valid OTP
@@ -188,8 +228,8 @@ router.post('/login', [
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    // Check if verified
-    if (!user.is_verified) {
+    // Check if verified (skip if email disabled)
+    if (!isEmailDisabled && !user.is_verified) {
       return res.status(401).json({ message: 'Please verify your email first' });
     }
 

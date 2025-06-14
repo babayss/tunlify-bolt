@@ -1,17 +1,51 @@
 const nodemailer = require('nodemailer');
 
-// Create transporter (fixed: createTransport, bukan createTransporter)
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false, // true for 465, false for other ports
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+// Check if email is disabled
+const isEmailDisabled = process.env.DISABLE_EMAIL === 'true';
+
+let transporter = null;
+
+if (!isEmailDisabled) {
+  // Create transporter
+  transporter = nodemailer.createTransporter({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+    // Connection timeout
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 5000,    // 5 seconds
+    socketTimeout: 10000,     // 10 seconds
+  });
+
+  // Verify SMTP connection on startup
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error('❌ SMTP Configuration Error:', error.message);
+      console.error('💡 Check your email settings in .env file');
+      console.error('💡 Or set DISABLE_EMAIL=true to skip email verification');
+    } else {
+      console.log('✅ SMTP Server ready for email sending');
+    }
+  });
+} else {
+  console.log('📧 Email disabled - OTP verification skipped');
+}
 
 const sendOTPEmail = async (email, otp, name) => {
+  // If email is disabled, just log and return success
+  if (isEmailDisabled) {
+    console.log(`📧 Email disabled - OTP for ${email}: ${otp}`);
+    return Promise.resolve({ messageId: 'disabled' });
+  }
+
+  if (!transporter) {
+    throw new Error('Email transporter not configured');
+  }
+
   const mailOptions = {
     from: `"Tunlify" <${process.env.SMTP_USER}>`,
     to: email,
@@ -51,7 +85,14 @@ const sendOTPEmail = async (email, otp, name) => {
     `,
   };
 
-  return transporter.sendMail(mailOptions);
+  try {
+    const result = await transporter.sendMail(mailOptions);
+    console.log('✅ OTP email sent successfully to:', email);
+    return result;
+  } catch (error) {
+    console.error('❌ Failed to send OTP email:', error.message);
+    throw error;
+  }
 };
 
 module.exports = { sendOTPEmail };
