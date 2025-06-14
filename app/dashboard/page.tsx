@@ -5,7 +5,6 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -19,7 +18,6 @@ import {
   Server, 
   Zap,
   BarChart3,
-  Settings,
   Copy,
   ExternalLink,
   Trash2,
@@ -29,6 +27,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/hooks/useLanguage';
 import { getTranslation } from '@/lib/i18n';
 import { toast } from 'sonner';
+import Cookies from 'js-cookie';
 
 interface Tunnel {
   id: string;
@@ -71,9 +70,19 @@ export default function DashboardPage() {
     }
   }, [user]);
 
+  const getAuthHeaders = () => {
+    const token = Cookies.get('auth_token');
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    };
+  };
+
   const fetchTunnels = async () => {
     try {
-      const response = await fetch('/api/tunnels');
+      const response = await fetch('/api/tunnels', {
+        headers: getAuthHeaders(),
+      });
       if (response.ok) {
         const data = await response.json();
         setTunnels(data);
@@ -103,9 +112,7 @@ export default function DashboardPage() {
     try {
       const response = await fetch('/api/tunnels', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           ...newTunnel,
           target_port: parseInt(newTunnel.target_port),
@@ -130,6 +137,7 @@ export default function DashboardPage() {
     try {
       const response = await fetch(`/api/tunnels/${tunnelId}`, {
         method: 'DELETE',
+        headers: getAuthHeaders(),
       });
 
       if (response.ok) {
@@ -302,9 +310,9 @@ export default function DashboardPage() {
                     <p className="text-sm font-medium text-muted-foreground">
                       {language === 'id' ? 'Bandwidth' : 'Bandwidth'}
                     </p>
-                    <p className="text-2xl font-bold">1.2GB</p>
+                    <p className="text-2xl font-bold">-</p>
                     <p className="text-xs text-muted-foreground">
-                      {language === 'id' ? 'dari 50GB' : 'of 50GB'}
+                      {language === 'id' ? 'Tidak tersedia' : 'Not available'}
                     </p>
                   </div>
                   <BarChart3 className="h-8 w-8 text-blue-500" />
@@ -317,9 +325,11 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">
-                      {language === 'id' ? 'Uptime' : 'Uptime'}
+                      {language === 'id' ? 'Status' : 'Status'}
                     </p>
-                    <p className="text-2xl font-bold">99.9%</p>
+                    <p className="text-2xl font-bold text-green-500">
+                      {language === 'id' ? 'Aktif' : 'Active'}
+                    </p>
                   </div>
                   <Zap className="h-8 w-8 text-yellow-500" />
                 </div>

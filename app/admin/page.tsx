@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -21,7 +20,6 @@ import {
   Edit,
   Trash2,
   Save,
-  Globe,
   Shield,
   Activity
 } from 'lucide-react';
@@ -29,6 +27,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/hooks/useLanguage';
 import { getTranslation } from '@/lib/i18n';
 import { toast } from 'sonner';
+import Cookies from 'js-cookie';
 
 interface User {
   id: string;
@@ -76,9 +75,19 @@ export default function AdminPage() {
     }
   }, [user]);
 
+  const getAuthHeaders = () => {
+    const token = Cookies.get('auth_token');
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    };
+  };
+
   const fetchUsers = async () => {
     try {
-      const response = await fetch('/api/admin/users');
+      const response = await fetch('/api/admin/users', {
+        headers: getAuthHeaders(),
+      });
       if (response.ok) {
         const data = await response.json();
         setUsers(data);
@@ -92,7 +101,9 @@ export default function AdminPage() {
 
   const fetchServerLocations = async () => {
     try {
-      const response = await fetch('/api/admin/server-locations');
+      const response = await fetch('/api/admin/server-locations', {
+        headers: getAuthHeaders(),
+      });
       if (response.ok) {
         const data = await response.json();
         setServerLocations(data);
@@ -104,7 +115,9 @@ export default function AdminPage() {
 
   const fetchContentPages = async () => {
     try {
-      const response = await fetch('/api/admin/content');
+      const response = await fetch('/api/admin/content', {
+        headers: getAuthHeaders(),
+      });
       if (response.ok) {
         const data = await response.json();
         setContentPages(data);
@@ -116,7 +129,9 @@ export default function AdminPage() {
 
   const fetchSettings = async () => {
     try {
-      const response = await fetch('/api/admin/settings');
+      const response = await fetch('/api/admin/settings', {
+        headers: getAuthHeaders(),
+      });
       if (response.ok) {
         const data = await response.json();
         setGoogleClientId(data.google_client_id || '');
@@ -130,9 +145,7 @@ export default function AdminPage() {
     try {
       const response = await fetch('/api/admin/settings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ google_client_id: googleClientId }),
       });
 
