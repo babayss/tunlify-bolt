@@ -6,8 +6,8 @@ const isEmailDisabled = process.env.DISABLE_EMAIL === 'true';
 let transporter = null;
 
 if (!isEmailDisabled) {
-  // Create transporter
-  transporter = nodemailer.createTransporter({
+  // Create transporter (FIXED: createTransport, bukan createTransporter)
+  transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT) || 587,
     secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
