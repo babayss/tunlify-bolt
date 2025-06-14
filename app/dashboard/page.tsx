@@ -61,6 +61,7 @@ export default function DashboardPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [setupDialogOpen, setSetupDialogOpen] = useState(false);
   const [selectedTunnel, setSelectedTunnel] = useState<Tunnel | null>(null);
+  const [formLoading, setFormLoading] = useState(false);
   const [newTunnel, setNewTunnel] = useState({
     subdomain: '',
     location: '',
@@ -116,13 +117,45 @@ export default function DashboardPage() {
   const handleCreateTunnel = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Validation
+    if (!newTunnel.subdomain.trim()) {
+      toast.error(language === 'id' ? 'Subdomain harus diisi' : 'Subdomain is required');
+      return;
+    }
+    
+    if (!newTunnel.location) {
+      toast.error(language === 'id' ? 'Lokasi harus dipilih' : 'Location must be selected');
+      return;
+    }
+
+    // Validate subdomain format
+    const subdomainRegex = /^[a-z0-9-]+$/;
+    if (!subdomainRegex.test(newTunnel.subdomain)) {
+      toast.error(language === 'id' ? 'Subdomain hanya boleh huruf kecil, angka, dan tanda hubung' : 'Subdomain can only contain lowercase letters, numbers, and hyphens');
+      return;
+    }
+
+    if (newTunnel.subdomain.length < 3 || newTunnel.subdomain.length > 50) {
+      toast.error(language === 'id' ? 'Subdomain harus 3-50 karakter' : 'Subdomain must be 3-50 characters');
+      return;
+    }
+
+    setFormLoading(true);
+    
     try {
-      const response = await apiClient.post('/api/tunnels', newTunnel, {
+      console.log('🔍 Creating tunnel with data:', newTunnel);
+      
+      const response = await apiClient.post('/api/tunnels', {
+        subdomain: newTunnel.subdomain.trim().toLowerCase(),
+        location: newTunnel.location
+      }, {
         headers: getAuthHeaders(),
       });
 
       if (response.ok) {
         const tunnel = await response.json();
+        console.log('✅ Tunnel created:', tunnel);
+        
         toast.success(language === 'id' ? 'Tunnel berhasil dibuat!' : 'Tunnel created successfully!');
         setCreateDialogOpen(false);
         setNewTunnel({ subdomain: '', location: '' });
@@ -133,10 +166,14 @@ export default function DashboardPage() {
         setSetupDialogOpen(true);
       } else {
         const error = await response.json();
-        toast.error(error.message);
+        console.error('❌ Tunnel creation failed:', error);
+        toast.error(error.message || (language === 'id' ? 'Gagal membuat tunnel' : 'Failed to create tunnel'));
       }
     } catch (error) {
+      console.error('❌ Tunnel creation error:', error);
       toast.error(language === 'id' ? 'Gagal membuat tunnel' : 'Failed to create tunnel');
+    } finally {
+      setFormLoading(false);
     }
   };
 
@@ -219,6 +256,7 @@ export default function DashboardPage() {
                       onChange={(e) => setNewTunnel({ ...newTunnel, subdomain: e.target.value })}
                       placeholder="myapp"
                       required
+                      disabled={formLoading}
                     />
                     <p className="text-xs text-muted-foreground">
                       {language === 'id' ? 'Akan menjadi: ' : 'Will become: '}
@@ -231,6 +269,7 @@ export default function DashboardPage() {
                     <Select
                       value={newTunnel.location}
                       onValueChange={(value) => setNewTunnel({ ...newTunnel, location: value })}
+                      disabled={formLoading}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder={language === 'id' ? 'Pilih lokasi' : 'Select location'} />
@@ -246,10 +285,22 @@ export default function DashboardPage() {
                   </div>
                   
                   <div className="flex gap-2">
-                    <Button type="submit" className="flex-1">
-                      {language === 'id' ? 'Buat Tunnel' : 'Create Tunnel'}
+                    <Button type="submit" className="flex-1" disabled={formLoading}>
+                      {formLoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          {language === 'id' ? 'Membuat...' : 'Creating...'}
+                        </>
+                      ) : (
+                        language === 'id' ? 'Buat Tunnel' : 'Create Tunnel'
+                      )}
                     </Button>
-                    <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={() => setCreateDialogOpen(false)}
+                      disabled={formLoading}
+                    >
                       {t('cancel')}
                     </Button>
                   </div>
