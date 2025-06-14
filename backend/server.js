@@ -36,20 +36,26 @@ const serverLocationRoutes = require('./routes/server-locations');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// IMPORTANT: Trust proxy untuk handle X-Forwarded-For dari Caddy
-app.set('trust proxy', true);
+// IMPORTANT: Trust proxy dengan konfigurasi spesifik untuk Caddy
+// Hanya trust dari localhost (Caddy) dan private networks
+app.set('trust proxy', ['127.0.0.1', '::1', 'loopback', 'linklocal', 'uniquelocal']);
 
 // Security middleware
 app.use(helmet());
 app.use(morgan('combined'));
 
-// Rate limiting dengan trust proxy
+// Rate limiting dengan konfigurasi yang aman
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  // Skip rate limiting untuk localhost (development)
+  skip: (req) => {
+    const ip = req.ip;
+    return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  }
 });
 app.use('/api/', limiter);
 
@@ -75,7 +81,9 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     version: '1.0.0',
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    trust_proxy: app.get('trust proxy'),
+    client_ip: req.ip
   });
 });
 
@@ -111,7 +119,7 @@ app.listen(PORT, () => {
   console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
   console.log(`🔧 Supabase URL: ${process.env.SUPABASE_URL ? '✅ Configured' : '❌ Missing'}`);
-  console.log(`🔒 Trust Proxy: ✅ Enabled (for Caddy X-Forwarded-For)`);
+  console.log(`🔒 Trust Proxy: ✅ Specific (localhost + private networks)`);
 });
 
 module.exports = app;
