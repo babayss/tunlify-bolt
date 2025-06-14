@@ -23,7 +23,22 @@ export function useLanguage() {
 
   const detectLanguageFromIP = async () => {
     try {
-      const response = await fetch(`https://ipinfo.io?token=${process.env.NEXT_PUBLIC_IPINFO_TOKEN}`);
+      const ipinfoToken = process.env.NEXT_PUBLIC_IPINFO_TOKEN;
+      
+      // Check if token is available and not a placeholder
+      if (!ipinfoToken || ipinfoToken === 'your_ipinfo_token' || ipinfoToken.startsWith('your_')) {
+        console.warn('IPInfo token not configured, using default language');
+        setLanguage(defaultLanguage);
+        setLoading(false);
+        return;
+      }
+
+      const response = await fetch(`https://ipinfo.io?token=${ipinfoToken}`);
+      
+      if (!response.ok) {
+        throw new Error(`IPInfo API error: ${response.status}`);
+      }
+      
       const data = await response.json();
       
       // Indonesia detection
