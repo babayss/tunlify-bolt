@@ -25,6 +25,13 @@ api.tunlify.biz.id {
         X-XSS-Protection "1; mode=block"
     }
     
+    # SSL dengan Cloudflare DNS
+    tls {
+        dns cloudflare {
+            api_token 57CLHvTwjLFNevw2JcSB1JNxM4jv5B3Z_A3QM5aM
+        }
+    }
+    
     # Logs
     log {
         output file /var/log/caddy/tunlify-api.log
@@ -51,6 +58,15 @@ api.tunlify.biz.id {
     header {
         X-Powered-By "Tunlify"
         X-Tunnel-Region "id"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+    }
+    
+    # SSL dengan Cloudflare DNS (sama seperti API)
+    tls {
+        dns cloudflare {
+            api_token 57CLHvTwjLFNevw2JcSB1JNxM4jv5B3Z_A3QM5aM
+        }
     }
     
     # Logs
@@ -60,7 +76,7 @@ api.tunlify.biz.id {
     }
 }
 
-# Wildcard untuk region lain jika diperlukan nanti
+# Optional: Wildcard untuk region lain jika diperlukan nanti
 *.sg.tunlify.biz.id {
     @tunnel expression {labels.3} != ""
     
@@ -76,6 +92,14 @@ api.tunlify.biz.id {
     header {
         X-Powered-By "Tunlify"
         X-Tunnel-Region "sg"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+    }
+    
+    tls {
+        dns cloudflare {
+            api_token 57CLHvTwjLFNevw2JcSB1JNxM4jv5B3Z_A3QM5aM
+        }
     }
     
     log {
@@ -99,6 +123,14 @@ api.tunlify.biz.id {
     header {
         X-Powered-By "Tunlify"
         X-Tunnel-Region "us"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+    }
+    
+    tls {
+        dns cloudflare {
+            api_token 57CLHvTwjLFNevw2JcSB1JNxM4jv5B3Z_A3QM5aM
+        }
     }
     
     log {
