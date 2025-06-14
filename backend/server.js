@@ -36,15 +36,20 @@ const serverLocationRoutes = require('./routes/server-locations');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// IMPORTANT: Trust proxy untuk handle X-Forwarded-For dari Caddy
+app.set('trust proxy', true);
+
 // Security middleware
 app.use(helmet());
 app.use(morgan('combined'));
 
-// Rate limiting
+// Rate limiting dengan trust proxy
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 app.use('/api/', limiter);
 
@@ -106,6 +111,7 @@ app.listen(PORT, () => {
   console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
   console.log(`🔧 Supabase URL: ${process.env.SUPABASE_URL ? '✅ Configured' : '❌ Missing'}`);
+  console.log(`🔒 Trust Proxy: ✅ Enabled (for Caddy X-Forwarded-For)`);
 });
 
 module.exports = app;
