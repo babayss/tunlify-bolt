@@ -1,0 +1,133 @@
+{
+    # Disable admin endpoint untuk menghindari konflik port
+    admin off
+}
+
+# Backend API
+api.tunlify.biz.id {
+    reverse_proxy localhost:3001
+    
+    # CORS headers untuk frontend di Server B
+    header {
+        Access-Control-Allow-Origin "https://tunlify.biz.id"
+        Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+        Access-Control-Allow-Headers "Content-Type, Authorization"
+        Access-Control-Allow-Credentials "true"
+    }
+    
+    # Handle preflight requests
+    @options method OPTIONS
+    respond @options 200
+    
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+    }
+    
+    # SSL dengan Cloudflare DNS
+    tls {
+        dns cloudflare {
+            api_token 57CLHvTwjLFNevw2JcSB1JNxM4jv5B3Z_A3QM5aM
+        }
+    }
+    
+    # Logs
+    log {
+        output file /var/log/caddy/tunlify-api.log
+        format json
+    }
+}
+
+# Wildcard untuk tunnel subdomains - Indonesia region
+*.id.tunlify.biz.id {
+    # Extract subdomain (contoh: myapp.id.tunlify.biz.id -> myapp)
+    @tunnel expression {labels.3} != ""
+    
+    # Reverse proxy ke backend untuk mendapatkan target
+    reverse_proxy @tunnel localhost:3001/tunnel-proxy {
+        header_up X-Tunnel-Subdomain {labels.3}
+        header_up X-Tunnel-Region "id"
+        header_up X-Real-IP {remote_host}
+    }
+    
+    # Security headers
+    header {
+        X-Powered-By "Tunlify"
+        X-Tunnel-Region "id"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+    }
+    
+    # SSL dengan Cloudflare DNS (sama seperti API)
+    tls {
+        dns cloudflare {
+            api_token 57CLHvTwjLFNevw2JcSB1JNxM4jv5B3Z_A3QM5aM
+        }
+    }
+    
+    # Logs
+    log {
+        output file /var/log/caddy/tunlify-tunnels-id.log
+        format json
+    }
+}
+
+# Optional: Wildcard untuk region lain jika diperlukan nanti
+*.sg.tunlify.biz.id {
+    @tunnel expression {labels.3} != ""
+    
+    reverse_proxy @tunnel localhost:3001/tunnel-proxy {
+        header_up X-Tunnel-Subdomain {labels.3}
+        header_up X-Tunnel-Region "sg"
+        header_up X-Real-IP {remote_host}
+    }
+    
+    header {
+        X-Powered-By "Tunlify"
+        X-Tunnel-Region "sg"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+    }
+    
+    tls {
+        dns cloudflare {
+            api_token 57CLHvTwjLFNevw2JcSB1JNxM4jv5B3Z_A3QM5aM
+        }
+    }
+    
+    log {
+        output file /var/log/caddy/tunlify-tunnels-sg.log
+        format json
+    }
+}
+
+*.us.tunlify.biz.id {
+    @tunnel expression {labels.3} != ""
+    
+    reverse_proxy @tunnel localhost:3001/tunnel-proxy {
+        header_up X-Tunnel-Subdomain {labels.3}
+        header_up X-Tunnel-Region "us"
+        header_up X-Real-IP {remote_host}
+    }
+    
+    header {
+        X-Powered-By "Tunlify"
+        X-Tunnel-Region "us"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+    }
+    
+    tls {
+        dns cloudflare {
+            api_token 57CLHvTwjLFNevw2JcSB1JNxM4jv5B3Z_A3QM5aM
+        }
+    }
+    
+    log {
+        output file /var/log/caddy/tunlify-tunnels-us.log
+        format json
+    }
+}
