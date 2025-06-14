@@ -14,6 +14,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/hooks/useLanguage';
 import { getTranslation } from '@/lib/i18n';
 import { toast } from 'sonner';
+import { apiClient } from '@/lib/api';
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -64,12 +65,9 @@ export default function RegisterPage() {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/verify-otp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email: formData.email, otp }),
+      const response = await apiClient.post('/api/auth/verify-otp', {
+        email: formData.email,
+        otp,
       });
 
       if (!response.ok) {

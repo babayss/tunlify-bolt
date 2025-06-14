@@ -27,6 +27,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/hooks/useLanguage';
 import { getTranslation } from '@/lib/i18n';
 import { toast } from 'sonner';
+import { apiClient } from '@/lib/api';
 import Cookies from 'js-cookie';
 
 interface Tunnel {
@@ -74,13 +75,12 @@ export default function DashboardPage() {
     const token = Cookies.get('auth_token');
     return {
       'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
     };
   };
 
   const fetchTunnels = async () => {
     try {
-      const response = await fetch('/api/tunnels', {
+      const response = await apiClient.get('/api/tunnels', {
         headers: getAuthHeaders(),
       });
       if (response.ok) {
@@ -96,7 +96,7 @@ export default function DashboardPage() {
 
   const fetchServerLocations = async () => {
     try {
-      const response = await fetch('/api/server-locations');
+      const response = await apiClient.get('/api/server-locations');
       if (response.ok) {
         const data = await response.json();
         setServerLocations(data);
@@ -110,13 +110,11 @@ export default function DashboardPage() {
     e.preventDefault();
     
     try {
-      const response = await fetch('/api/tunnels', {
-        method: 'POST',
+      const response = await apiClient.post('/api/tunnels', {
+        ...newTunnel,
+        target_port: parseInt(newTunnel.target_port),
+      }, {
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          ...newTunnel,
-          target_port: parseInt(newTunnel.target_port),
-        }),
       });
 
       if (response.ok) {
@@ -135,8 +133,7 @@ export default function DashboardPage() {
 
   const handleDeleteTunnel = async (tunnelId: string) => {
     try {
-      const response = await fetch(`/api/tunnels/${tunnelId}`, {
-        method: 'DELETE',
+      const response = await apiClient.delete(`/api/tunnels/${tunnelId}`, {
         headers: getAuthHeaders(),
       });
 

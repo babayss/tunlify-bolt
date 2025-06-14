@@ -3,6 +3,7 @@
 import { useState, useEffect, createContext, useContext } from 'react';
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
+import { apiClient } from '@/lib/api';
 
 interface User {
   id: string;
@@ -39,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const response = await fetch('/api/auth/me', {
+      const response = await apiClient.get('/api/auth/me', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -60,12 +61,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = async (email: string, password: string) => {
-    const response = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ email, password }),
+    const response = await apiClient.post('/api/auth/login', {
+      email,
+      password,
     });
 
     if (!response.ok) {
@@ -86,12 +84,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const register = async (email: string, password: string, name: string) => {
-    const response = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ email, password, name }),
+    const response = await apiClient.post('/api/auth/register', {
+      email,
+      password,
+      name,
     });
 
     if (!response.ok) {
