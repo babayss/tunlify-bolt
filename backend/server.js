@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const http = require('http');
 require('dotenv').config();
 
 // Check required environment variables
@@ -32,9 +33,20 @@ const tunnelProxyRoutes = require('./routes/tunnel-proxy');
 const adminRoutes = require('./routes/admin');
 const contentRoutes = require('./routes/content');
 const serverLocationRoutes = require('./routes/server-locations');
+const { setupWebSocketServer } = require('./routes/websocket');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Create HTTP server
+const server = http.createServer(app);
+
+// Setup WebSocket server
+const { activeTunnels, forwardRequest } = setupWebSocketServer(server);
+
+// Make WebSocket functions available to routes
+app.locals.activeTunnels = activeTunnels;
+app.locals.forwardRequest = forwardRequest;
 
 // IMPORTANT: Trust proxy dengan konfigurasi spesifik untuk Caddy
 // Hanya trust dari localhost (Caddy) dan private networks
@@ -119,7 +131,9 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     trust_proxy: app.get('trust proxy'),
     client_ip: req.ip,
-    cors_enabled: true
+    cors_enabled: true,
+    websocket_enabled: true,
+    active_tunnels: activeTunnels.size
   });
 });
 
@@ -150,13 +164,14 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🚀 Tunlify Backend API running on port ${PORT}`);
   console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
   console.log(`🔧 Supabase URL: ${process.env.SUPABASE_URL ? '✅ Configured' : '❌ Missing'}`);
   console.log(`🔒 Trust Proxy: ✅ Specific (localhost + private networks)`);
   console.log(`🌐 CORS: ✅ Comprehensive with explicit OPTIONS handler`);
+  console.log(`🔌 WebSocket: ✅ Enabled on /ws/tunnel`);
 });
 
 module.exports = app;
