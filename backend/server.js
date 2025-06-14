@@ -59,7 +59,7 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// CORS configuration - SINGLE CONFIGURATION ONLY
+// CORS configuration - COMPREHENSIVE SETUP
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -79,11 +79,32 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200, // Some legacy browsers choke on 204
+  preflightContinue: false // Pass control to next handler after successful preflight
 };
 
 app.use(cors(corsOptions));
+
+// EXPLICIT OPTIONS handler for all routes (backup)
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'https://tunlify.biz.id',
+    process.env.FRONTEND_URL
+  ].filter(Boolean);
+  
+  if (!origin || allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Max-Age', '86400'); // 24 hours
+  }
+  
+  res.status(200).end();
+});
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -97,7 +118,8 @@ app.get('/health', (req, res) => {
     version: '1.0.0',
     environment: process.env.NODE_ENV || 'development',
     trust_proxy: app.get('trust proxy'),
-    client_ip: req.ip
+    client_ip: req.ip,
+    cors_enabled: true
   });
 });
 
@@ -134,7 +156,7 @@ app.listen(PORT, () => {
   console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
   console.log(`🔧 Supabase URL: ${process.env.SUPABASE_URL ? '✅ Configured' : '❌ Missing'}`);
   console.log(`🔒 Trust Proxy: ✅ Specific (localhost + private networks)`);
-  console.log(`🌐 CORS: ✅ Single configuration with origin function`);
+  console.log(`🌐 CORS: ✅ Comprehensive with explicit OPTIONS handler`);
 });
 
 module.exports = app;
