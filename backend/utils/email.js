@@ -7,6 +7,8 @@ let transporter = null;
 
 // ONLY create transporter if email is NOT disabled
 if (!isEmailDisabled) {
+  console.log('📧 Email enabled - Setting up SMTP...');
+  
   // Create transporter (FIXED: createTransport, bukan createTransporter)
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -34,12 +36,14 @@ if (!isEmailDisabled) {
   });
 } else {
   console.log('📧 Email disabled - No SMTP connection will be made');
+  console.log('📧 Users will be auto-verified without OTP');
 }
 
 const sendOTPEmail = async (email, otp, name) => {
   // If email is disabled, just log and return success
   if (isEmailDisabled) {
     console.log(`📧 Email disabled - OTP for ${email}: ${otp}`);
+    console.log('📧 User will be auto-verified');
     return Promise.resolve({ messageId: 'disabled' });
   }
 
