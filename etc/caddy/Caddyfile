@@ -38,18 +38,11 @@ api.tunlify.biz.id {
     # Extract subdomain (contoh: myapp.id.tunlify.biz.id -> myapp)
     @tunnel expression {labels.3} != ""
     
-    # PENTING: Ini adalah tunnel proxy yang akan:
-    # 1. Terima request ke myapp.id.tunlify.biz.id
-    # 2. Extract subdomain "myapp" 
-    # 3. Kirim ke backend untuk lookup tunnel target
-    # 4. Backend akan proxy ke target user (misal 127.0.0.1:3000)
+    # Reverse proxy ke backend untuk tunnel handling
     reverse_proxy @tunnel localhost:3001/tunnel-proxy {
         header_up X-Tunnel-Subdomain {labels.3}
         header_up X-Tunnel-Region "id"
         header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up X-Forwarded-Host {host}
     }
     
     # Security headers
@@ -82,9 +75,6 @@ api.tunlify.biz.id {
         header_up X-Tunnel-Subdomain {labels.3}
         header_up X-Tunnel-Region "sg"
         header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up X-Forwarded-Host {host}
     }
     
     header {
@@ -113,9 +103,6 @@ api.tunlify.biz.id {
         header_up X-Tunnel-Subdomain {labels.3}
         header_up X-Tunnel-Region "us"
         header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up X-Forwarded-Host {host}
     }
     
     header {
