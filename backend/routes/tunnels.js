@@ -36,14 +36,24 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Create tunnel (ngrok-style)
+// Create tunnel (ngrok-style) - FIXED VALIDATION
 router.post('/', authenticateToken, [
-  body('subdomain').trim().isLength({ min: 3, max: 50 }).matches(/^[a-z0-9-]+$/),
-  body('location').trim().isLength({ min: 2, max: 10 })
+  body('subdomain')
+    .trim()
+    .isLength({ min: 3, max: 50 })
+    .matches(/^[a-z0-9-]+$/)
+    .withMessage('Subdomain must be 3-50 characters, lowercase letters, numbers, and hyphens only'),
+  body('location')
+    .trim()
+    .isLength({ min: 2, max: 10 })
+    .withMessage('Location must be 2-10 characters')
 ], async (req, res) => {
   try {
+    console.log('🔍 Create tunnel request:', req.body);
+    
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('❌ Validation errors:', errors.array());
       return res.status(400).json({ 
         message: 'Validation failed', 
         errors: errors.array() 
@@ -52,7 +62,9 @@ router.post('/', authenticateToken, [
 
     const { subdomain, location } = req.body;
 
-    // Check if subdomain is already taken
+    console.log(`🔍 Creating tunnel: ${subdomain}.${location} for user ${req.user.id}`);
+
+    // Check if subdomain is already taken in this location
     const { data: existingTunnel } = await supabase
       .from('tunnels')
       .select('id')
@@ -61,6 +73,7 @@ router.post('/', authenticateToken, [
       .single();
 
     if (existingTunnel) {
+      console.log(`❌ Subdomain already taken: ${subdomain}.${location}`);
       return res.status(409).json({ 
         message: `Subdomain '${subdomain}' is already taken in ${location}` 
       });
@@ -69,16 +82,18 @@ router.post('/', authenticateToken, [
     // Check if location exists
     const { data: locationData, error: locationError } = await supabase
       .from('server_locations')
-      .select('id')
+      .select('id, name')
       .eq('region_code', location)
       .single();
 
     if (locationError || !locationData) {
+      console.log(`❌ Invalid location: ${location}`);
       return res.status(400).json({ message: 'Invalid server location' });
     }
 
     // Generate unique connection token
     const connectionToken = crypto.randomBytes(32).toString('hex');
+    console.log(`🔑 Generated connection token: ${connectionToken.substring(0, 8)}...`);
 
     // Create tunnel
     const { data: tunnel, error: createError } = await supabase
@@ -95,16 +110,15 @@ router.post('/', authenticateToken, [
       .single();
 
     if (createError) {
-      console.error('Create tunnel error:', createError);
+      console.error('❌ Create tunnel error:', createError);
       return res.status(500).json({ message: 'Failed to create tunnel' });
     }
 
-    console.log(`✅ Tunnel created: ${subdomain}.${location}.tunlify.biz.id`);
-    console.log(`🔑 Connection token: ${connectionToken}`);
+    console.log(`✅ Tunnel created successfully: ${subdomain}.${location}.tunlify.biz.id`);
     
     res.status(201).json({
       ...tunnel,
-      tunnel_url: `https://${subdomain}.${location}.${process.env.TUNNEL_BASE_DOMAIN}`,
+      tunnel_url: `https://${subdomain}.${location}.${process.env.TUNNEL_BASE_DOMAIN || 'tunlify.biz.id'}`,
       setup_instructions: {
         download_url: 'https://github.com/tunlify/client/releases/latest',
         command: `./tunlify-client -token=${connectionToken} -local=127.0.0.1:3000`
@@ -112,7 +126,7 @@ router.post('/', authenticateToken, [
     });
 
   } catch (error) {
-    console.error('Create tunnel error:', error);
+    console.error('❌ Create tunnel error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -261,7 +275,7 @@ router.post('/auth', [
       tunnel_id: tunnel.id,
       subdomain: tunnel.subdomain,
       location: tunnel.location,
-      tunnel_url: `https://${tunnel.subdomain}.${tunnel.location}.${process.env.TUNNEL_BASE_DOMAIN}`,
+      tunnel_url: `https://${tunnel.subdomain}.${tunnel.location}.${process.env.TUNNEL_BASE_DOMAIN || 'tunlify.biz.id'}`,
       user: tunnel.users.name
     });
 
