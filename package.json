@@ -69,6 +69,8 @@
     "zod": "^3.23.8",
     "framer-motion": "^10.16.16",
     "js-cookie": "^3.0.5",
-    "@types/js-cookie": "^3.0.6"
+    "@types/js-cookie": "^3.0.6",
+    "bcrypt": "^5.1.1",
+    "@types/bcrypt": "^5.0.2"
   }
 }
