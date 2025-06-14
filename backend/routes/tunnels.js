@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const pool = require('../config/database');
+const supabase = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -8,16 +8,27 @@ const router = express.Router();
 // Get user tunnels
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT t.*, sl.name as location_name 
-       FROM tunnels t 
-       LEFT JOIN server_locations sl ON t.location = sl.region_code 
-       WHERE t.user_id = $1 
-       ORDER BY t.created_at DESC`,
-      [req.user.id]
-    );
+    const { data: tunnels, error } = await supabase
+      .from('tunnels')
+      .select(`
+        *,
+        server_locations!tunnels_location_fkey(name)
+      `)
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false });
 
-    res.json(result.rows);
+    if (error) {
+      console.error('Get tunnels error:', error);
+      return res.status(500).json({ message: 'Failed to fetch tunnels' });
+    }
+
+    // Format response
+    const formattedTunnels = tunnels.map(tunnel => ({
+      ...tunnel,
+      location_name: tunnel.server_locations?.name || tunnel.location
+    }));
+
+    res.json(formattedTunnels);
   } catch (error) {
     console.error('Get tunnels error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -43,36 +54,48 @@ router.post('/', authenticateToken, [
     const { subdomain, target_ip, target_port, location } = req.body;
 
     // Check if subdomain is already taken
-    const existingTunnel = await pool.query(
-      'SELECT id FROM tunnels WHERE subdomain = $1 AND location = $2',
-      [subdomain, location]
-    );
+    const { data: existingTunnel } = await supabase
+      .from('tunnels')
+      .select('id')
+      .eq('subdomain', subdomain)
+      .eq('location', location)
+      .single();
 
-    if (existingTunnel.rows.length > 0) {
+    if (existingTunnel) {
       return res.status(409).json({ 
         message: `Subdomain '${subdomain}' is already taken in ${location}` 
       });
     }
 
     // Check if location exists
-    const locationResult = await pool.query(
-      'SELECT id FROM server_locations WHERE region_code = $1',
-      [location]
-    );
+    const { data: locationData, error: locationError } = await supabase
+      .from('server_locations')
+      .select('id')
+      .eq('region_code', location)
+      .single();
 
-    if (locationResult.rows.length === 0) {
+    if (locationError || !locationData) {
       return res.status(400).json({ message: 'Invalid server location' });
     }
 
     // Create tunnel
-    const result = await pool.query(
-      `INSERT INTO tunnels (user_id, subdomain, target_ip, target_port, location, status) 
-       VALUES ($1, $2, $3, $4, $5, 'active') 
-       RETURNING *`,
-      [req.user.id, subdomain, target_ip, target_port, location]
-    );
+    const { data: tunnel, error: createError } = await supabase
+      .from('tunnels')
+      .insert([{
+        user_id: req.user.id,
+        subdomain,
+        target_ip,
+        target_port,
+        location,
+        status: 'active'
+      }])
+      .select()
+      .single();
 
-    const tunnel = result.rows[0];
+    if (createError) {
+      console.error('Create tunnel error:', createError);
+      return res.status(500).json({ message: 'Failed to create tunnel' });
+    }
 
     // Here you would typically configure the actual tunnel/proxy
     // For now, we'll just return the tunnel data
@@ -94,17 +117,27 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
 
     // Check if tunnel belongs to user
-    const tunnel = await pool.query(
-      'SELECT * FROM tunnels WHERE id = $1 AND user_id = $2',
-      [id, req.user.id]
-    );
+    const { data: tunnel, error: findError } = await supabase
+      .from('tunnels')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', req.user.id)
+      .single();
 
-    if (tunnel.rows.length === 0) {
+    if (findError || !tunnel) {
       return res.status(404).json({ message: 'Tunnel not found' });
     }
 
     // Delete tunnel
-    await pool.query('DELETE FROM tunnels WHERE id = $1', [id]);
+    const { error: deleteError } = await supabase
+      .from('tunnels')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) {
+      console.error('Delete tunnel error:', deleteError);
+      return res.status(500).json({ message: 'Failed to delete tunnel' });
+    }
 
     // Here you would typically remove the actual tunnel/proxy configuration
 
@@ -133,22 +166,31 @@ router.patch('/:id/status', authenticateToken, [
     const { status } = req.body;
 
     // Check if tunnel belongs to user
-    const tunnel = await pool.query(
-      'SELECT * FROM tunnels WHERE id = $1 AND user_id = $2',
-      [id, req.user.id]
-    );
+    const { data: tunnel, error: findError } = await supabase
+      .from('tunnels')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', req.user.id)
+      .single();
 
-    if (tunnel.rows.length === 0) {
+    if (findError || !tunnel) {
       return res.status(404).json({ message: 'Tunnel not found' });
     }
 
     // Update status
-    const result = await pool.query(
-      'UPDATE tunnels SET status = $1 WHERE id = $2 RETURNING *',
-      [status, id]
-    );
+    const { data: updatedTunnel, error: updateError } = await supabase
+      .from('tunnels')
+      .update({ status })
+      .eq('id', id)
+      .select()
+      .single();
 
-    res.json(result.rows[0]);
+    if (updateError) {
+      console.error('Update tunnel status error:', updateError);
+      return res.status(500).json({ message: 'Failed to update tunnel status' });
+    }
+
+    res.json(updatedTunnel);
 
   } catch (error) {
     console.error('Update tunnel status error:', error);

@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const pool = require('../config/database');
+const supabase = require('../config/database');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
@@ -12,11 +12,17 @@ router.use(requireAdmin);
 // Get all users
 router.get('/users', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT id, email, name, role, is_verified, created_at FROM users ORDER BY created_at DESC'
-    );
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, email, name, role, is_verified, created_at')
+      .order('created_at', { ascending: false });
 
-    res.json(result.rows);
+    if (error) {
+      console.error('Get users error:', error);
+      return res.status(500).json({ message: 'Failed to fetch users' });
+    }
+
+    res.json(users);
   } catch (error) {
     console.error('Get users error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -26,11 +32,17 @@ router.get('/users', async (req, res) => {
 // Get all server locations
 router.get('/server-locations', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM server_locations ORDER BY name'
-    );
+    const { data: locations, error } = await supabase
+      .from('server_locations')
+      .select('*')
+      .order('name');
 
-    res.json(result.rows);
+    if (error) {
+      console.error('Get server locations error:', error);
+      return res.status(500).json({ message: 'Failed to fetch server locations' });
+    }
+
+    res.json(locations);
   } catch (error) {
     console.error('Get server locations error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -55,23 +67,28 @@ router.post('/server-locations', [
     const { name, region_code, ip_address } = req.body;
 
     // Check if region code already exists
-    const existing = await pool.query(
-      'SELECT id FROM server_locations WHERE region_code = $1',
-      [region_code]
-    );
+    const { data: existing } = await supabase
+      .from('server_locations')
+      .select('id')
+      .eq('region_code', region_code)
+      .single();
 
-    if (existing.rows.length > 0) {
+    if (existing) {
       return res.status(409).json({ message: 'Region code already exists' });
     }
 
-    const result = await pool.query(
-      `INSERT INTO server_locations (name, region_code, ip_address) 
-       VALUES ($1, $2, $3) 
-       RETURNING *`,
-      [name, region_code, ip_address]
-    );
+    const { data: newLocation, error } = await supabase
+      .from('server_locations')
+      .insert([{ name, region_code, ip_address }])
+      .select()
+      .single();
 
-    res.status(201).json(result.rows[0]);
+    if (error) {
+      console.error('Add server location error:', error);
+      return res.status(500).json({ message: 'Failed to add server location' });
+    }
+
+    res.status(201).json(newLocation);
 
   } catch (error) {
     console.error('Add server location error:', error);
@@ -82,11 +99,18 @@ router.post('/server-locations', [
 // Get content pages
 router.get('/content', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM content_pages ORDER BY type, lang'
-    );
+    const { data: content, error } = await supabase
+      .from('content_pages')
+      .select('*')
+      .order('type')
+      .order('lang');
 
-    res.json(result.rows);
+    if (error) {
+      console.error('Get content error:', error);
+      return res.status(500).json({ message: 'Failed to fetch content' });
+    }
+
+    res.json(content);
   } catch (error) {
     console.error('Get content error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -96,15 +120,19 @@ router.get('/content', async (req, res) => {
 // Get settings
 router.get('/settings', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM admin_settings ORDER BY created_at DESC LIMIT 1'
-    );
+    const { data: settings, error } = await supabase
+      .from('admin_settings')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
 
-    if (result.rows.length === 0) {
-      return res.json({ google_client_id: null });
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+      console.error('Get settings error:', error);
+      return res.status(500).json({ message: 'Failed to fetch settings' });
     }
 
-    res.json(result.rows[0]);
+    res.json(settings || { google_client_id: null });
   } catch (error) {
     console.error('Get settings error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -119,20 +147,33 @@ router.post('/settings', [
     const { google_client_id } = req.body;
 
     // Check if settings exist
-    const existing = await pool.query('SELECT id FROM admin_settings LIMIT 1');
+    const { data: existing } = await supabase
+      .from('admin_settings')
+      .select('id')
+      .limit(1)
+      .single();
 
-    if (existing.rows.length === 0) {
+    if (!existing) {
       // Create new settings
-      await pool.query(
-        'INSERT INTO admin_settings (google_client_id) VALUES ($1)',
-        [google_client_id]
-      );
+      const { error } = await supabase
+        .from('admin_settings')
+        .insert([{ google_client_id }]);
+
+      if (error) {
+        console.error('Create settings error:', error);
+        return res.status(500).json({ message: 'Failed to create settings' });
+      }
     } else {
       // Update existing settings
-      await pool.query(
-        'UPDATE admin_settings SET google_client_id = $1 WHERE id = $2',
-        [google_client_id, existing.rows[0].id]
-      );
+      const { error } = await supabase
+        .from('admin_settings')
+        .update({ google_client_id })
+        .eq('id', existing.id);
+
+      if (error) {
+        console.error('Update settings error:', error);
+        return res.status(500).json({ message: 'Failed to update settings' });
+      }
     }
 
     res.json({ message: 'Settings updated successfully' });

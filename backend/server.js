@@ -7,6 +7,7 @@ require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
 const tunnelRoutes = require('./routes/tunnels');
+const tunnelProxyRoutes = require('./routes/tunnel-proxy');
 const adminRoutes = require('./routes/admin');
 const contentRoutes = require('./routes/content');
 const serverLocationRoutes = require('./routes/server-locations');
@@ -50,6 +51,9 @@ app.get('/health', (req, res) => {
     version: '1.0.0'
   });
 });
+
+// Tunnel proxy routes (handle subdomain requests from Caddy)
+app.use('/tunnel-proxy', tunnelProxyRoutes);
 
 // API Routes
 app.use('/api/auth', authRoutes);

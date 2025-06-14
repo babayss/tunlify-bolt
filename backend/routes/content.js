@@ -1,5 +1,5 @@
 const express = require('express');
-const pool = require('../config/database');
+const supabase = require('../config/database');
 
 const router = express.Router();
 
@@ -8,18 +8,25 @@ router.get('/landing', async (req, res) => {
   try {
     const { lang = 'en' } = req.query;
 
-    const result = await pool.query(
-      'SELECT content FROM content_pages WHERE type = $1 AND lang = $2',
-      ['landing', lang]
-    );
+    const { data: content, error } = await supabase
+      .from('content_pages')
+      .select('content')
+      .eq('type', 'landing')
+      .eq('lang', lang)
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+      console.error('Get landing content error:', error);
+      return res.status(500).json({ message: 'Failed to fetch content' });
+    }
+
+    if (!content) {
       // Return default content
       const defaultContent = getDefaultLandingContent(lang);
       return res.json(defaultContent);
     }
 
-    res.json(result.rows[0].content);
+    res.json(content.content);
   } catch (error) {
     console.error('Get landing content error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -31,18 +38,25 @@ router.get('/pricing', async (req, res) => {
   try {
     const { lang = 'en' } = req.query;
 
-    const result = await pool.query(
-      'SELECT content FROM content_pages WHERE type = $1 AND lang = $2',
-      ['pricing', lang]
-    );
+    const { data: content, error } = await supabase
+      .from('content_pages')
+      .select('content')
+      .eq('type', 'pricing')
+      .eq('lang', lang)
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+      console.error('Get pricing content error:', error);
+      return res.status(500).json({ message: 'Failed to fetch content' });
+    }
+
+    if (!content) {
       // Return default content
       const defaultContent = getDefaultPricingContent(lang);
       return res.json(defaultContent);
     }
 
-    res.json(result.rows[0].content);
+    res.json(content.content);
   } catch (error) {
     console.error('Get pricing content error:', error);
     res.status(500).json({ message: 'Internal server error' });

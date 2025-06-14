@@ -1,6 +1,6 @@
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
-const pool = require('../config/database');
+const supabase = require('../config/database');
 
 const router = express.Router();
 
@@ -18,15 +18,18 @@ router.use('*', async (req, res, next) => {
     }
 
     // Find tunnel in database
-    const result = await pool.query(
-      `SELECT t.*, u.email as user_email 
-       FROM tunnels t 
-       JOIN users u ON t.user_id = u.id 
-       WHERE t.subdomain = $1 AND t.location = $2 AND t.status = 'active'`,
-      [subdomain, region]
-    );
+    const { data: tunnels, error } = await supabase
+      .from('tunnels')
+      .select(`
+        *,
+        users!tunnels_user_id_fkey(email)
+      `)
+      .eq('subdomain', subdomain)
+      .eq('location', region)
+      .eq('status', 'active')
+      .limit(1);
 
-    if (result.rows.length === 0) {
+    if (error || !tunnels || tunnels.length === 0) {
       return res.status(404).json({
         message: 'Tunnel not found',
         subdomain: subdomain,
@@ -34,7 +37,7 @@ router.use('*', async (req, res, next) => {
       });
     }
 
-    const tunnel = result.rows[0];
+    const tunnel = tunnels[0];
     const targetUrl = `http://${tunnel.target_ip}:${tunnel.target_port}`;
 
     // Log tunnel access
@@ -59,7 +62,7 @@ router.use('*', async (req, res, next) => {
         proxyReq.setHeader('X-Forwarded-For', req.ip);
         proxyReq.setHeader('X-Forwarded-Proto', req.protocol);
         proxyReq.setHeader('X-Forwarded-Host', req.get('host'));
-        proxyReq.setHeader('X-Tunnel-User', tunnel.user_email);
+        proxyReq.setHeader('X-Tunnel-User', tunnel.users?.email || 'unknown');
       },
       onProxyRes: (proxyRes, req, res) => {
         // Add tunnel info headers
