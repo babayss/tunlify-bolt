@@ -62,7 +62,7 @@ export default function DashboardPage() {
   const [setupDialogOpen, setSetupDialogOpen] = useState(false);
   const [selectedTunnel, setSelectedTunnel] = useState<Tunnel | null>(null);
   const [formLoading, setFormLoading] = useState(false);
-  const [newTunnel, setNewTunnel] = useState({
+  const [formData, setFormData] = useState({
     subdomain: '',
     location: '',
   });
@@ -83,6 +83,7 @@ export default function DashboardPage() {
     const token = Cookies.get('auth_token');
     return {
       'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
     };
   };
 
@@ -114,60 +115,88 @@ export default function DashboardPage() {
     }
   };
 
+  const handleInputChange = (field: string, value: string) => {
+    console.log(`🔍 Form field changed: ${field} = "${value}"`);
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
   const handleCreateTunnel = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    console.log('🔍 Form submission started');
+    console.log('🔍 Current form data:', formData);
+    
     // Validation
-    if (!newTunnel.subdomain.trim()) {
+    if (!formData.subdomain.trim()) {
       toast.error(language === 'id' ? 'Subdomain harus diisi' : 'Subdomain is required');
       return;
     }
     
-    if (!newTunnel.location) {
+    if (!formData.location) {
       toast.error(language === 'id' ? 'Lokasi harus dipilih' : 'Location must be selected');
       return;
     }
 
     // Validate subdomain format
     const subdomainRegex = /^[a-z0-9-]+$/;
-    if (!subdomainRegex.test(newTunnel.subdomain)) {
+    const cleanSubdomain = formData.subdomain.trim().toLowerCase();
+    
+    if (!subdomainRegex.test(cleanSubdomain)) {
       toast.error(language === 'id' ? 'Subdomain hanya boleh huruf kecil, angka, dan tanda hubung' : 'Subdomain can only contain lowercase letters, numbers, and hyphens');
       return;
     }
 
-    if (newTunnel.subdomain.length < 3 || newTunnel.subdomain.length > 50) {
+    if (cleanSubdomain.length < 3 || cleanSubdomain.length > 50) {
       toast.error(language === 'id' ? 'Subdomain harus 3-50 karakter' : 'Subdomain must be 3-50 characters');
       return;
     }
 
     setFormLoading(true);
     
+    const payload = {
+      subdomain: cleanSubdomain,
+      location: formData.location
+    };
+    
+    console.log('🔍 Sending payload:', payload);
+    
     try {
-      console.log('🔍 Creating tunnel with data:', newTunnel);
-      
-      const response = await apiClient.post('/api/tunnels', {
-        subdomain: newTunnel.subdomain.trim().toLowerCase(),
-        location: newTunnel.location
-      }, {
+      const response = await apiClient.post('/api/tunnels', payload, {
         headers: getAuthHeaders(),
       });
 
+      console.log('🔍 Response status:', response.status);
+      
       if (response.ok) {
         const tunnel = await response.json();
         console.log('✅ Tunnel created:', tunnel);
         
         toast.success(language === 'id' ? 'Tunnel berhasil dibuat!' : 'Tunnel created successfully!');
         setCreateDialogOpen(false);
-        setNewTunnel({ subdomain: '', location: '' });
+        setFormData({ subdomain: '', location: '' });
         fetchTunnels();
         
         // Show setup dialog
         setSelectedTunnel(tunnel);
         setSetupDialogOpen(true);
       } else {
-        const error = await response.json();
-        console.error('❌ Tunnel creation failed:', error);
-        toast.error(error.message || (language === 'id' ? 'Gagal membuat tunnel' : 'Failed to create tunnel'));
+        const errorText = await response.text();
+        console.error('❌ Tunnel creation failed:', errorText);
+        
+        try {
+          const error = JSON.parse(errorText);
+          if (error.errors && Array.isArray(error.errors)) {
+            const errorMessages = error.errors.map((err: any) => `${err.path}: ${err.msg}`).join(', ');
+            toast.error(errorMessages);
+          } else {
+            toast.error(error.message || (language === 'id' ? 'Gagal membuat tunnel' : 'Failed to create tunnel'));
+          }
+        } catch (parseError) {
+          toast.error(language === 'id' ? 'Gagal membuat tunnel' : 'Failed to create tunnel');
+        }
       }
     } catch (error) {
       console.error('❌ Tunnel creation error:', error);
@@ -252,23 +281,23 @@ export default function DashboardPage() {
                     <Label htmlFor="subdomain">{t('subdomain')}</Label>
                     <Input
                       id="subdomain"
-                      value={newTunnel.subdomain}
-                      onChange={(e) => setNewTunnel({ ...newTunnel, subdomain: e.target.value })}
+                      value={formData.subdomain}
+                      onChange={(e) => handleInputChange('subdomain', e.target.value)}
                       placeholder="myapp"
                       required
                       disabled={formLoading}
                     />
                     <p className="text-xs text-muted-foreground">
                       {language === 'id' ? 'Akan menjadi: ' : 'Will become: '}
-                      {newTunnel.subdomain || 'myapp'}.{newTunnel.location || 'id'}.tunlify.biz.id
+                      {formData.subdomain || 'myapp'}.{formData.location || 'id'}.tunlify.biz.id
                     </p>
                   </div>
                   
                   <div className="space-y-2">
                     <Label htmlFor="location">{t('location')}</Label>
                     <Select
-                      value={newTunnel.location}
-                      onValueChange={(value) => setNewTunnel({ ...newTunnel, location: value })}
+                      value={formData.location}
+                      onValueChange={(value) => handleInputChange('location', value)}
                       disabled={formLoading}
                     >
                       <SelectTrigger>
