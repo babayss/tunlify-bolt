@@ -1,5 +1,4 @@
 const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
 const supabase = require('../config/database');
 
 const router = express.Router();
@@ -11,11 +10,12 @@ router.use('*', async (req, res, next) => {
     const region = req.headers['x-tunnel-region'];
     
     console.log(`🔍 Tunnel request: ${subdomain}.${region}.tunlify.biz.id`);
+    console.log(`🔍 Method: ${req.method} ${req.url}`);
     console.log(`🔍 Headers:`, {
       subdomain,
       region,
       'x-real-ip': req.headers['x-real-ip'],
-      'user-agent': req.headers['user-agent']
+      'user-agent': req.headers['user-agent']?.substring(0, 50) + '...'
     });
     
     if (!subdomain || !region) {
@@ -23,10 +23,7 @@ router.use('*', async (req, res, next) => {
       return res.status(400).json({ 
         message: 'Invalid tunnel request',
         error: 'Missing subdomain or region headers',
-        received_headers: {
-          subdomain,
-          region
-        }
+        received_headers: { subdomain, region }
       });
     }
 
@@ -80,61 +77,102 @@ router.use('*', async (req, res, next) => {
         region: region,
         help: 'Start your tunnel client with the connection token',
         tunnel_url: `https://${subdomain}.${region}.tunlify.biz.id`,
-        status: 'client_disconnected'
+        status: 'client_disconnected',
+        instructions: {
+          download: 'https://github.com/tunlify/client/releases/latest',
+          command: `./tunlify-client -token=${tunnel.connection_token} -local=127.0.0.1:3000`
+        }
       });
     }
 
-    // For ngrok-style tunneling, we need to get the target from active client connection
-    // Since we don't have WebSocket implementation yet, we'll return a helpful message
-    console.log(`🔄 Tunnel proxy not fully implemented yet`);
-    return res.status(502).json({
-      message: 'Tunnel proxy not fully implemented',
-      subdomain: subdomain,
-      region: region,
-      tunnel_id: tunnel.id,
-      status: 'implementation_pending',
-      help: 'WebSocket-based proxy forwarding is coming soon',
-      current_implementation: 'Database lookup working, proxy forwarding pending'
-    });
+    // Get WebSocket forwarding function from app locals
+    const { activeTunnels, forwardRequest } = req.app.locals;
+    const tunnelKey = `${subdomain}.${region}`;
 
-    // TODO: Implement WebSocket-based proxy forwarding
-    // This would involve:
-    // 1. WebSocket connection between client and server
-    // 2. Real-time request forwarding
-    // 3. Response streaming back to browser
+    console.log(`🔍 Checking active WebSocket connections for: ${tunnelKey}`);
+    console.log(`🔍 Active tunnels: ${activeTunnels ? activeTunnels.size : 0}`);
+
+    if (!activeTunnels || !activeTunnels.has(tunnelKey)) {
+      console.log(`❌ WebSocket connection not found for: ${tunnelKey}`);
+      return res.status(503).json({
+        message: 'Tunnel client WebSocket not connected',
+        subdomain: subdomain,
+        region: region,
+        tunnel_id: tunnel.id,
+        status: 'websocket_disconnected',
+        help: 'Client needs to establish WebSocket connection',
+        websocket_url: `wss://api.tunlify.biz.id/ws/tunnel?token=${tunnel.connection_token}`,
+        instructions: {
+          step1: 'Download latest client',
+          step2: 'Run: ./tunlify-client -token=YOUR_TOKEN -local=127.0.0.1:3000',
+          step3: 'Client will auto-connect via WebSocket'
+        }
+      });
+    }
+
+    // Forward request via WebSocket
+    console.log(`🔄 Forwarding request via WebSocket: ${req.method} ${req.url}`);
     
-    /*
-    // Future implementation would look like this:
-    const targetUrl = `http://${tunnel.target_ip}:${tunnel.target_port}`;
-    
-    const proxy = createProxyMiddleware({
-      target: targetUrl,
-      changeOrigin: true,
-      ws: true,
-      onError: (err, req, res) => {
-        console.error(`❌ Proxy error for ${subdomain}.${region}:`, err.message);
-        res.status(502).json({
-          message: 'Bad Gateway',
-          error: 'Unable to connect to target server',
-          tunnel: `${subdomain}.${region}.tunlify.biz.id`,
-          target: targetUrl
+    try {
+      const requestData = {
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        body: req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined
+      };
+
+      const response = await forwardRequest(tunnelKey, requestData);
+      
+      console.log(`✅ Response received from client: ${response.statusCode}`);
+
+      // Set response headers
+      if (response.headers) {
+        Object.entries(response.headers).forEach(([key, value]) => {
+          res.setHeader(key, value);
         });
-      },
-      onProxyReq: (proxyReq, req, res) => {
-        proxyReq.setHeader('X-Forwarded-For', req.ip);
-        proxyReq.setHeader('X-Forwarded-Proto', req.protocol);
-        proxyReq.setHeader('X-Forwarded-Host', req.get('host'));
-        proxyReq.setHeader('X-Tunnel-User', tunnel.users?.email || 'unknown');
-      },
-      onProxyRes: (proxyRes, req, res) => {
-        proxyRes.headers['X-Tunnel-Subdomain'] = subdomain;
-        proxyRes.headers['X-Tunnel-Region'] = region;
-        proxyRes.headers['X-Powered-By'] = 'Tunlify';
       }
-    });
 
-    proxy(req, res, next);
-    */
+      // Add tunnel info headers
+      res.setHeader('X-Tunnel-Subdomain', subdomain);
+      res.setHeader('X-Tunnel-Region', region);
+      res.setHeader('X-Powered-By', 'Tunlify');
+      res.setHeader('X-Tunnel-User', tunnel.users?.email || 'unknown');
+
+      // Send response
+      res.status(response.statusCode || 200);
+      
+      if (response.body) {
+        res.send(response.body);
+      } else {
+        res.end();
+      }
+
+    } catch (forwardError) {
+      console.error(`❌ Request forwarding error: ${forwardError.message}`);
+      
+      if (forwardError.message.includes('timeout')) {
+        return res.status(504).json({
+          message: 'Gateway Timeout',
+          error: 'Local application did not respond in time',
+          tunnel: `${subdomain}.${region}.tunlify.biz.id`,
+          help: 'Check if your local application is running and responsive'
+        });
+      } else if (forwardError.message.includes('not connected')) {
+        return res.status(503).json({
+          message: 'Service Unavailable',
+          error: 'Tunnel client disconnected during request',
+          tunnel: `${subdomain}.${region}.tunlify.biz.id`,
+          help: 'Restart your tunnel client'
+        });
+      } else {
+        return res.status(502).json({
+          message: 'Bad Gateway',
+          error: 'Unable to forward request to local application',
+          tunnel: `${subdomain}.${region}.tunlify.biz.id`,
+          details: forwardError.message
+        });
+      }
+    }
 
   } catch (error) {
     console.error('❌ Tunnel proxy error:', error);

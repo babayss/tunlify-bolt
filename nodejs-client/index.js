@@ -34,7 +34,9 @@ class TunlifyClient {
     this.config = config;
     this.tunnel = null;
     this.ws = null;
-    this.localServer = null;
+    this.connected = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
   }
 
   async start() {
@@ -61,7 +63,11 @@ class TunlifyClient {
       await this.testLocalConnection();
       localSpinner.succeed('Local application is accessible');
 
-      // Step 3: Start tunnel
+      // Step 3: Connect WebSocket
+      const wsSpinner = ora('Establishing WebSocket connection...').start();
+      await this.connectWebSocket();
+      wsSpinner.succeed('WebSocket connection established');
+
       console.log(chalk.green('🔗 Your tunnel is now active!'));
       console.log(chalk.yellow(`🌍 Public URL: ${this.tunnel.tunnel_url}`));
       console.log(chalk.yellow(`📍 Forwarding to: http://${this.config.local}`));
@@ -125,24 +131,174 @@ class TunlifyClient {
     });
   }
 
+  async connectWebSocket() {
+    return new Promise((resolve, reject) => {
+      const wsUrl = this.config.server.replace('https://', 'wss://').replace('http://', 'ws://');
+      const fullWsUrl = `${wsUrl}/ws/tunnel?token=${this.config.token}`;
+      
+      console.log(chalk.gray(`🔌 Connecting to: ${fullWsUrl}`));
+
+      this.ws = new WebSocket(fullWsUrl);
+
+      this.ws.on('open', () => {
+        console.log(chalk.green('✅ WebSocket connected'));
+        this.connected = true;
+        this.reconnectAttempts = 0;
+        
+        // Send local address to server
+        this.ws.send(JSON.stringify({
+          type: 'set_local_address',
+          address: this.config.local
+        }));
+        
+        resolve();
+      });
+
+      this.ws.on('message', (data) => {
+        try {
+          const message = JSON.parse(data);
+          this.handleWebSocketMessage(message);
+        } catch (error) {
+          console.error(chalk.red('❌ Failed to parse WebSocket message:'), error);
+        }
+      });
+
+      this.ws.on('close', () => {
+        console.log(chalk.yellow('🔌 WebSocket disconnected'));
+        this.connected = false;
+        
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++;
+          console.log(chalk.yellow(`🔄 Reconnecting... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`));
+          setTimeout(() => this.connectWebSocket(), 5000);
+        } else {
+          console.error(chalk.red('❌ Max reconnection attempts reached'));
+          process.exit(1);
+        }
+      });
+
+      this.ws.on('error', (error) => {
+        console.error(chalk.red('❌ WebSocket error:'), error.message);
+        reject(error);
+      });
+
+      // Timeout for initial connection
+      setTimeout(() => {
+        if (!this.connected) {
+          reject(new Error('WebSocket connection timeout'));
+        }
+      }, 10000);
+    });
+  }
+
+  handleWebSocketMessage(message) {
+    switch (message.type) {
+      case 'connected':
+        console.log(chalk.green(`✅ ${message.message}`));
+        break;
+
+      case 'local_address_ack':
+        console.log(chalk.green(`✅ Local address confirmed: ${message.address}`));
+        break;
+
+      case 'request':
+        this.handleIncomingRequest(message);
+        break;
+
+      case 'heartbeat_ack':
+        // Heartbeat acknowledged
+        break;
+
+      default:
+        console.log(chalk.gray(`📨 Received: ${message.type}`));
+    }
+  }
+
+  async handleIncomingRequest(message) {
+    const { requestId, method, url: requestUrl, headers } = message;
+    
+    console.log(chalk.cyan(`📥 ${method} ${requestUrl} (${requestId})`));
+
+    try {
+      // Forward request to local application
+      const [host, port] = this.config.local.split(':');
+      const localUrl = `http://${host}:${port}${requestUrl}`;
+      
+      const response = await axios({
+        method: method.toLowerCase(),
+        url: localUrl,
+        headers: this.filterHeaders(headers),
+        data: message.body,
+        timeout: 30000,
+        validateStatus: () => true // Accept all status codes
+      });
+
+      // Send response back to server
+      this.ws.send(JSON.stringify({
+        type: 'response',
+        requestId,
+        statusCode: response.status,
+        headers: response.headers,
+        body: response.data
+      }));
+
+      console.log(chalk.green(`📤 ${response.status} ${method} ${requestUrl}`));
+
+    } catch (error) {
+      console.error(chalk.red(`❌ Error forwarding request: ${error.message}`));
+      
+      // Send error response
+      this.ws.send(JSON.stringify({
+        type: 'error',
+        requestId,
+        message: error.message
+      }));
+    }
+  }
+
+  filterHeaders(headers) {
+    // Remove headers that shouldn't be forwarded
+    const filtered = { ...headers };
+    delete filtered['host'];
+    delete filtered['x-tunnel-subdomain'];
+    delete filtered['x-tunnel-region'];
+    delete filtered['x-real-ip'];
+    delete filtered['x-forwarded-for'];
+    delete filtered['x-forwarded-proto'];
+    delete filtered['x-forwarded-host'];
+    return filtered;
+  }
+
   async keepAlive() {
     // Send heartbeat every 30 seconds
-    setInterval(async () => {
-      try {
+    const heartbeatInterval = setInterval(() => {
+      if (this.connected && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: 'heartbeat' }));
         console.log(chalk.gray(`💓 Heartbeat - Tunnel active: ${this.tunnel.tunnel_url}`));
-        
-        // Test local connection periodically
+      }
+    }, 30000);
+
+    // Test local connection periodically
+    const localTestInterval = setInterval(async () => {
+      try {
         await this.testLocalConnection();
       } catch (error) {
         console.log(chalk.yellow(`⚠️  Local application unreachable: ${error.message}`));
       }
-    }, 30000);
+    }, 60000); // Every minute
 
     // Keep process alive
     return new Promise(() => {
-      // This promise never resolves, keeping the process alive
       process.on('SIGINT', () => {
         console.log(chalk.yellow('\n🛑 Shutting down tunnel...'));
+        
+        clearInterval(heartbeatInterval);
+        clearInterval(localTestInterval);
+        
+        if (this.ws) {
+          this.ws.close();
+        }
+        
         console.log(chalk.green('✅ Tunnel disconnected. Goodbye!'));
         process.exit(0);
       });

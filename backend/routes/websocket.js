@@ -11,6 +11,9 @@ function setupWebSocketServer(server) {
 
   // Store active tunnel connections
   const activeTunnels = new Map();
+  
+  // Store pending requests waiting for responses
+  const pendingRequests = new Map();
 
   wss.on('connection', async (ws, req) => {
     const query = url.parse(req.url, true).query;
@@ -59,8 +62,12 @@ function setupWebSocketServer(server) {
       activeTunnels.set(tunnelKey, {
         ws,
         tunnel,
-        localAddress: null // Will be set by client
+        localAddress: null,
+        connected: true,
+        lastHeartbeat: Date.now()
       });
+
+      console.log(`📊 Active tunnels: ${activeTunnels.size}`);
 
       // Handle messages from client
       ws.on('message', async (message) => {
@@ -75,18 +82,46 @@ function setupWebSocketServer(server) {
               if (connection) {
                 connection.localAddress = data.address;
                 console.log(`🎯 Local address set: ${data.address} for ${tunnelKey}`);
+                
+                // Send acknowledgment
+                ws.send(JSON.stringify({
+                  type: 'local_address_ack',
+                  address: data.address
+                }));
               }
               break;
 
             case 'response':
               // Client sends response back to browser
-              // TODO: Forward to waiting HTTP request
-              console.log('📤 Response from client:', data.requestId);
+              const requestId = data.requestId;
+              console.log(`📤 Response from client for request: ${requestId}`);
+              
+              if (pendingRequests.has(requestId)) {
+                const { resolve } = pendingRequests.get(requestId);
+                pendingRequests.delete(requestId);
+                resolve(data);
+              } else {
+                console.log(`⚠️  No pending request found for ID: ${requestId}`);
+              }
               break;
 
             case 'heartbeat':
               // Client heartbeat
+              const conn = activeTunnels.get(tunnelKey);
+              if (conn) {
+                conn.lastHeartbeat = Date.now();
+              }
               ws.send(JSON.stringify({ type: 'heartbeat_ack' }));
+              break;
+
+            case 'error':
+              // Client error
+              console.log(`❌ Client error: ${data.message}`);
+              if (data.requestId && pendingRequests.has(data.requestId)) {
+                const { reject } = pendingRequests.get(data.requestId);
+                pendingRequests.delete(data.requestId);
+                reject(new Error(data.message));
+              }
               break;
           }
         } catch (error) {
@@ -109,6 +144,19 @@ function setupWebSocketServer(server) {
 
         // Remove from active connections
         activeTunnels.delete(tunnelKey);
+        
+        // Reject any pending requests
+        for (const [requestId, { reject }] of pendingRequests.entries()) {
+          reject(new Error('Client disconnected'));
+          pendingRequests.delete(requestId);
+        }
+        
+        console.log(`📊 Active tunnels: ${activeTunnels.size}`);
+      });
+
+      // Handle WebSocket errors
+      ws.on('error', (error) => {
+        console.error(`❌ WebSocket error for ${tunnelKey}:`, error);
       });
 
       // Send welcome message
@@ -119,7 +167,8 @@ function setupWebSocketServer(server) {
           subdomain: tunnel.subdomain,
           location: tunnel.location,
           url: `https://${tunnel.subdomain}.${tunnel.location}.tunlify.biz.id`
-        }
+        },
+        message: 'WebSocket connection established successfully'
       }));
 
     } catch (error) {
@@ -137,35 +186,64 @@ function setupWebSocketServer(server) {
     }
 
     return new Promise((resolve, reject) => {
-      const requestId = Date.now().toString();
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Set timeout
       const timeout = setTimeout(() => {
-        reject(new Error('Request timeout'));
+        pendingRequests.delete(requestId);
+        reject(new Error('Request timeout - local application did not respond'));
       }, 30000); // 30 second timeout
 
-      // Listen for response
-      const responseHandler = (message) => {
-        try {
-          const data = JSON.parse(message);
-          if (data.type === 'response' && data.requestId === requestId) {
-            clearTimeout(timeout);
-            connection.ws.removeListener('message', responseHandler);
-            resolve(data);
-          }
-        } catch (error) {
-          // Ignore parsing errors for other messages
+      // Store pending request
+      pendingRequests.set(requestId, { 
+        resolve: (data) => {
+          clearTimeout(timeout);
+          resolve(data);
+        }, 
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
         }
-      };
-
-      connection.ws.on('message', responseHandler);
+      });
 
       // Send request to client
-      connection.ws.send(JSON.stringify({
+      const message = {
         type: 'request',
         requestId,
-        ...requestData
-      }));
+        method: requestData.method,
+        url: requestData.url,
+        headers: requestData.headers,
+        body: requestData.body
+      };
+
+      console.log(`📤 Sending request to client: ${requestId} ${requestData.method} ${requestData.url}`);
+      
+      try {
+        connection.ws.send(JSON.stringify(message));
+      } catch (error) {
+        clearTimeout(timeout);
+        pendingRequests.delete(requestId);
+        reject(new Error('Failed to send request to client'));
+      }
     });
   };
+
+  // Cleanup function for stale connections
+  const cleanupStaleConnections = () => {
+    const now = Date.now();
+    const staleTimeout = 5 * 60 * 1000; // 5 minutes
+    
+    for (const [tunnelKey, connection] of activeTunnels.entries()) {
+      if (now - connection.lastHeartbeat > staleTimeout) {
+        console.log(`🧹 Cleaning up stale connection: ${tunnelKey}`);
+        connection.ws.close();
+        activeTunnels.delete(tunnelKey);
+      }
+    }
+  };
+
+  // Run cleanup every 2 minutes
+  setInterval(cleanupStaleConnections, 2 * 60 * 1000);
 
   return { activeTunnels, forwardRequest };
 }
