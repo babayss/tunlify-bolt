@@ -36,7 +36,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Create tunnel (ngrok-style) - FIXED VALIDATION
+// Create tunnel (ngrok-style) - FIXED: Remove target_ip and target_port requirements
 router.post('/', authenticateToken, [
   body('subdomain')
     .trim()
@@ -95,7 +95,7 @@ router.post('/', authenticateToken, [
     const connectionToken = crypto.randomBytes(32).toString('hex');
     console.log(`🔑 Generated connection token: ${connectionToken.substring(0, 8)}...`);
 
-    // Create tunnel
+    // Create tunnel WITHOUT target_ip and target_port (ngrok-style)
     const { data: tunnel, error: createError } = await supabase
       .from('tunnels')
       .insert([{
@@ -104,7 +104,8 @@ router.post('/', authenticateToken, [
         location,
         connection_token: connectionToken,
         status: 'inactive', // Will be active when client connects
-        client_connected: false
+        client_connected: false,
+        // NO target_ip and target_port - client will specify local address
       }])
       .select()
       .single();
