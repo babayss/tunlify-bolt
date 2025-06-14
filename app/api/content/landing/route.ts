@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       
       // Cache the default content
       try {
-        await redis.setex(
+        await redis.setEx(
           cacheKeys.landingContent(lang),
           cacheTTL.content,
           JSON.stringify(defaultContent)
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
     // Cache the content
     try {
-      await redis.setex(
+      await redis.setEx(
         cacheKeys.landingContent(lang),
         cacheTTL.content,
         JSON.stringify(content.content)
